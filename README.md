@@ -1,2 +1,31 @@
-# EntrenamientoPersonalizado
-App conectada a Strava para sacar tus datos personalizados y listos para planes, comparativas etc
+# Cuaderno de Entreno
+
+App web instalable (PWA) para seguir mis entrenos:
+
+- **Strava**: carreras, box/HIIT, marcas personales, ritmos, carga semanal.
+- **Box**: WODs copiados de AimHarder, marcas y benchmarks.
+- **Salud**: registro de síntomas (p. ej. bajadas de tensión) cruzado con la sesión del día.
+- **Plan**: semana tipo que se marca sola y resumen copiable para preguntar a Claude.
+
+## Privacidad
+
+Este repositorio solo contiene el código. Ningún dato personal se guarda aquí:
+
+- Las credenciales de Strava (Client Secret y tokens) y el token de GitHub se guardan solo en el navegador de cada dispositivo (`localStorage`).
+- Los registros (WODs, marcas, salud) se sincronizan en un **Gist secreto** de la cuenta del usuario.
+
+## Puesta en marcha
+
+1. Abrir la app → **Ajustes** (icono de engranaje).
+2. Crear una app en <https://www.strava.com/settings/api> con *Authorization Callback Domain* = el dominio de GitHub Pages (`<usuario>.github.io`). Pegar Client ID y Client Secret y pulsar **Conectar con Strava**.
+3. Crear un token de GitHub con solo el permiso `gist` (<https://github.com/settings/tokens/new?scopes=gist>) y pegarlo en **Sincronización**.
+4. En el móvil: menú del navegador → **Añadir a pantalla de inicio**.
+
+## Archivos
+
+| Archivo | Para qué |
+|---|---|
+| `index.html` | Estructura y estilos |
+| `app.js` | Lógica: Strava API, sincronización con Gist, vistas |
+| `sw.js` | Service worker para abrirla sin conexión |
+| `manifest.webmanifest` | Nombre e iconos al instalarla |

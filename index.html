@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Cuaderno de Entreno</title>
+<meta name="description" content="Tus entrenos de Strava, WODs, marcas y salud en una app.">
+<meta name="theme-color" content="#F3F4F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0F1412" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Entreno">
+<meta name="referrer" content="no-referrer">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap">
+<style>
+/* Layout: app de móvil, una columna con cabecera de semana, tarjetas por disciplina y barra inferior de pestañas */
+:root{
+  --bg:#F3F4F1; --surface:#FFFFFF; --surface-2:#E9EBE6; --fg:#16201B; --muted:#5E6A63; --line:#D6DAD3;
+  --run:#2752D9; --box:#D23F6B; --foot:#1B8A5A; --walk:#8A7A3C; --health:#C77A0E; --other:#7A8580;
+  --ok:#1B8A5A; --warn:#C77A0E; --bad:#C8333A;
+  --display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --nav-h:62px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0F1412; --surface:#171E1B; --surface-2:#202925; --fg:#E8ECE9; --muted:#97A39C; --line:#2C3631;
+  --run:#7C9BFF; --box:#FF7FA4; --foot:#4FD08F; --walk:#C9B36A; --health:#F2A93B; --other:#8E9A94;
+  --ok:#4FD08F; --warn:#F2A93B; --bad:#FF6B70; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0F1412; --surface:#171E1B; --surface-2:#202925; --fg:#E8ECE9; --muted:#97A39C; --line:#2C3631;
+  --run:#7C9BFF; --box:#FF7FA4; --foot:#4FD08F; --walk:#C9B36A; --health:#F2A93B; --other:#8E9A94;
+  --ok:#4FD08F; --warn:#F2A93B; --bad:#FF6B70; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.45}
+.wrap{max-width:720px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:14px calc(var(--nav-h) + 28px + env(safe-area-inset-bottom,0px))}
+h1,h2,h3{font-family:var(--display);margin:0;text-wrap:balance;letter-spacing:.01em}
+h1{font-size:34px;font-weight:800;line-height:1}
+h2{font-size:24px;font-weight:700;text-transform:uppercase}
+h3{font-size:18px;font-weight:700}
+p{margin:0}
+.muted{color:var(--muted)}
+a{color:inherit;text-decoration-thickness:1px;text-underline-offset:2px}
+.small{font-size:13px}
+.eyebrow{font-size:11.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.num{font-family:var(--display);font-variant-numeric:tabular-nums;font-weight:700}
+.stack{display:flex;flex-direction:column;gap:14px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.between{justify-content:space-between}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.grid4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+@media (max-width:520px){.grid4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.tile{background:var(--surface-2);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.tile .num{font-size:28px;line-height:1.05}
+.tile .lab{font-size:12px;color:var(--muted)}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--surface-2);color:var(--fg)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+.pill.ok{color:var(--ok)} .pill.warn{color:var(--warn)} .pill.bad{color:var(--bad)}
+header.top{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.status{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.banner{border:1px solid var(--line);border-left:4px solid var(--warn);background:var(--surface);padding:12px 14px;border-radius:10px;font-size:14px}
+.banner.bad{border-left-color:var(--bad)} .banner.info{border-left-color:var(--run)}
+.list{display:flex;flex-direction:column}
+.item{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.item:first-child{border-top:0}
+.item .t{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item .s{font-size:12.5px;color:var(--muted)}
+.badge{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;font-family:var(--display);font-weight:800;font-size:14px;color:#fff}
+.chart{width:100%;height:auto;display:block;overflow:visible}
+.chart text{fill:var(--muted);font-family:var(--body);font-size:11px}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+.legend span{display:inline-flex;gap:5px;align-items:center}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;padding:7px 6px;border-top:1px solid var(--line)}
+th{font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;border-top:0}
+td.r,th.r{text-align:right;font-variant-numeric:tabular-nums}
+.scroll{overflow-x:auto}
+form{display:flex;flex-direction:column;gap:10px}
+label{display:flex;flex-direction:column;gap:4px;font-size:12.5px;font-weight:600;color:var(--muted);min-width:0}
+input,select,textarea{font:inherit;font-size:16px;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:9px 10px;width:100%;min-width:0}
+textarea{min-height:84px;resize:vertical}
+input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible,a:focus-visible{outline:2px solid var(--run);outline-offset:2px}
+button{font:inherit;font-weight:600;border-radius:10px;border:1px solid var(--line);background:var(--surface-2);color:var(--fg);padding:10px 14px;cursor:pointer}
+button.primary{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+button.ghost{background:transparent;padding:6px 10px;font-size:13px}
+button.danger{color:var(--bad)}
+button:disabled{opacity:.5;cursor:default}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.seg button{padding:7px 12px;font-size:13px}
+.seg button[aria-pressed="true"]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--surface);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px);padding-left:env(safe-area-inset-left,0px);padding-right:env(safe-area-inset-right,0px)}
+nav.tabs .in{max-width:720px;margin:0 auto;display:grid;grid-template-columns:repeat(5,1fr);height:var(--nav-h)}
+nav.tabs a{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;text-decoration:none;color:var(--muted);font-size:11px;font-weight:600}
+nav.tabs a svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+nav.tabs a[aria-current="page"]{color:var(--fg)}
+nav.tabs a[aria-current="page"] svg{stroke:var(--fg)}
+.meter{height:10px;border-radius:999px;background:var(--surface-2);position:relative;overflow:hidden}
+.meter i{position:absolute;inset:0 auto 0 0;border-radius:999px}
+.week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+.day{background:var(--surface-2);border-radius:9px;padding:6px 4px;min-height:64px;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px}
+.day.today{outline:2px solid var(--fg);outline-offset:-2px}
+.day b{font-family:var(--display);font-size:15px}
+.chips{display:flex;flex-wrap:wrap;gap:3px;justify-content:center}
+.chip{width:10px;height:10px;border-radius:3px}
+.pre{white-space:pre-wrap;font-size:14px;line-height:1.55}
+details summary{cursor:pointer;font-weight:600}
+.check{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:start;padding:8px 0;border-top:1px solid var(--line)}
+.check:first-child{border-top:0}
+.box{width:22px;height:22px;border-radius:6px;border:2px solid var(--line);display:grid;place-items:center;font-size:13px;font-weight:800}
+.box.done{background:var(--ok);border-color:var(--ok);color:#fff}
+@media (prefers-reduced-motion:no-preference){.view{animation:fade .18s ease-out}@keyframes fade{from{transform:translateY(4px)}to{transform:none}}}
+
+
+html{color-scheme:light}
+body{margin:0;-webkit-tap-highlight-color:transparent}
+:root{padding-top:env(safe-area-inset-top,0px)}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.gear{display:inline-grid;place-items:center;width:34px;height:34px;border-radius:9px;border:1px solid var(--line);color:var(--fg);margin-left:6px}
+.gear svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8}
+#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--nav-h) + 16px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:999px;font-weight:600;font-size:14px;z-index:30;max-width:calc(100% - 32px);text-align:center}
+a.item:hover .t{text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="stack" style="gap:4px">
+      <span class="eyebrow" id="hdrEyebrow">Cuaderno de entreno</span>
+      <h1 id="hdrTitle">Hola</h1>
+    </div>
+    <div class="status" id="status"></div>
+  </header>
+  <main id="app"></main>
+</div>
+<div id="toast" role="status" hidden></div>
+<nav class="tabs" aria-label="Secciones">
+  <div class="in">
+    <a href="#resumen" data-v="resumen"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Resumen</a>
+    <a href="#correr" data-v="correr"><svg viewBox="0 0 24 24"><circle cx="14" cy="4.5" r="2"/><path d="M6 20l3-5 3 2 1-5 3 3h3M9 11l3-3 3 1"/></svg>Correr</a>
+    <a href="#box" data-v="box"><svg viewBox="0 0 24 24"><path d="M2 12h2M20 12h2M5 8v8M19 8v8M8 6v12M16 6v12M8 12h8"/></svg>Box</a>
+    <a href="#salud" data-v="salud"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.5-7 10-7 10z"/></svg>Salud</a>
+    <a href="#plan" data-v="plan"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>Plan</a>
+  </div>
+</nav>
+<script src="app.js"></script>
+</body>
+</html>
