@@ -11,7 +11,8 @@ App web instalable (PWA) para seguir mis entrenos:
 
 Este repositorio solo contiene el código. Ningún dato personal se guarda aquí:
 
-- Las credenciales de Strava (Client Secret y tokens) y el token de GitHub se guardan solo en el navegador de cada dispositivo (`localStorage`).
+- El token de GitHub se guarda solo en el navegador de cada dispositivo (`localStorage`).
+- Las credenciales de Strava (Client Secret y tokens) se guardan en el navegador y, para compartir la conexión entre dispositivos, **cifradas con AES-GCM** (clave derivada del token de GitHub con PBKDF2) dentro del Gist secreto.
 - Los registros (WODs, marcas, salud) se sincronizan en un **Gist secreto** de la cuenta del usuario.
 
 ## Puesta en marcha

@@ -74,18 +74,42 @@ async function tokenRequest(body){
     body: JSON.stringify({client_id:S.cfg.clientId, client_secret:S.cfg.clientSecret, ...body})});
   if(!r.ok) throw {code:"auth", status:r.status, message: (await r.text()).slice(0,200)};
   const j = await r.json();
-  S.tok = {access_token:j.access_token, refresh_token:j.refresh_token, expires_at:j.expires_at};
+  // Strava puede rotar el refresh token: se guarda siempre el último y se comparte con los demás dispositivos
+  S.tok = {access_token:j.access_token, refresh_token:j.refresh_token||S.tok?.refresh_token, expires_at:j.expires_at, at:Date.now()};
   if(j.athlete){ S.athlete = j.athlete; LS.set("athlete", j.athlete); }
   LS.set("stravaTok", S.tok);
+  credDirty = true; LS.set("credDirty", true);
+  if(S.cfg.ghToken) schedulePush();
+}
+// Renovación con candado (una sola a la vez) y rescate desde el Gist si otro dispositivo ya rotó el token
+let refreshing = null;
+function refreshToken(){
+  if(refreshing) return refreshing;
+  refreshing = (async ()=>{
+    const used = S.tok.refresh_token;
+    try{ await tokenRequest({grant_type:"refresh_token", refresh_token:used}); }
+    catch(e){
+      if(e.status>=400 && e.status<500 && S.cfg.ghToken){
+        await syncGist(true);
+        if(S.tok && S.tok.refresh_token!==used){
+          if(S.tok.expires_at*1000 - Date.now() > 120000) return;
+          await tokenRequest({grant_type:"refresh_token", refresh_token:S.tok.refresh_token}); return;
+        }
+      }
+      if(e.status>=400 && e.status<500) throw {code:"auth", status:e.status, message:"Strava ha cerrado la sesión (quizá revocaste el acceso). Pulsa «Volver a conectar» en Ajustes."};
+      throw {code:"net", message:"Sin conexión con Strava. Se reintentará al volver a abrir la app."};
+    }
+  })().finally(()=>{ refreshing = null; });
+  return refreshing;
 }
 async function ensureToken(){
   if(!S.tok) throw {code:"no_token"};
-  if(S.tok.expires_at*1000 - Date.now() < 120000) await tokenRequest({grant_type:"refresh_token", refresh_token:S.tok.refresh_token});
+  if(S.tok.expires_at*1000 - Date.now() < 120000) await refreshToken();
 }
 async function api(path){
   await ensureToken();
   let r = await fetch("https://www.strava.com/api/v3"+path, {headers:{Authorization:"Bearer "+S.tok.access_token}});
-  if(r.status===401){ await tokenRequest({grant_type:"refresh_token", refresh_token:S.tok.refresh_token}); r = await fetch("https://www.strava.com/api/v3"+path, {headers:{Authorization:"Bearer "+S.tok.access_token}}); }
+  if(r.status===401){ await refreshToken(); r = await fetch("https://www.strava.com/api/v3"+path, {headers:{Authorization:"Bearer "+S.tok.access_token}}); }
   if(r.status===429) throw {code:"rate", message:"Límite de peticiones de Strava alcanzado. Espera 15 minutos."};
   if(r.status===401 || r.status===403) throw {code:"auth", status:r.status, message:"Strava ha rechazado el acceso. Vuelve a conectar en Ajustes."};
   if(!r.ok) throw {code:"http", status:r.status, message:"Strava respondió "+r.status};
@@ -165,10 +189,37 @@ async function findOrCreateGist(){
 async function readGist(){
   const g = await gh("/gists/"+S.cfg.gistId);
   const f = g.files[GIST_FILE];
-  if(!f) return [];
+  if(!f) return {registros:[]};
   let txt = f.content;
   if(f.truncated){ txt = await (await fetch(f.raw_url)).text(); }
-  try{ return JSON.parse(txt).registros || []; }catch(e){ return []; }
+  try{ const j = JSON.parse(txt); return {registros:j.registros||[], secreto:j.secreto||null}; }catch(e){ return {registros:[]}; }
+}
+
+/* --- Credenciales de Strava compartidas entre dispositivos, cifradas (AES-GCM) con una clave derivada de tu token de GitHub --- */
+let credDirty = LS.get("credDirty", false), wipeCred = LS.get("wipeCred", false);
+const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const unb64 = s => Uint8Array.from(atob(s), c=>c.charCodeAt(0));
+async function cryptoKey(){
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(S.cfg.ghToken), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({name:"PBKDF2", salt:new TextEncoder().encode("cuaderno-entreno-v1"), iterations:150000, hash:"SHA-256"}, base, {name:"AES-GCM", length:256}, false, ["encrypt","decrypt"]);
+}
+async function sealCred(){
+  if(!S.cfg.clientId || !S.tok || !crypto.subtle) return null;
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const plain = new TextEncoder().encode(JSON.stringify({clientId:S.cfg.clientId, clientSecret:S.cfg.clientSecret, tok:S.tok, athlete:S.athlete?{firstname:S.athlete.firstname, id:S.athlete.id}:null}));
+  const ct = await crypto.subtle.encrypt({name:"AES-GCM", iv}, await cryptoKey(), plain);
+  return {iv:b64(iv), ct:b64(ct)};
+}
+async function openCred(sec){
+  if(!sec || !crypto.subtle) return null;
+  try{ const pt = await crypto.subtle.decrypt({name:"AES-GCM", iv:unb64(sec.iv)}, await cryptoKey(), unb64(sec.ct)); return JSON.parse(new TextDecoder().decode(pt)); }
+  catch(e){ return null; }
+}
+function adoptCred(c){
+  S.cfg.clientId = c.clientId; S.cfg.clientSecret = c.clientSecret; saveCfg();
+  S.tok = c.tok; LS.set("stravaTok", S.tok);
+  if(c.athlete && !S.athlete){ S.athlete = c.athlete; LS.set("athlete", c.athlete); }
+  if(S.err.strava?.code==="auth") delete S.err.strava;
 }
 function merge(a, b){
   const m = new Map();
@@ -176,17 +227,32 @@ function merge(a, b){
   return [...m.values()];
 }
 let pushTimer = null, dirty = LS.get("dirty", false);
-async function syncGist(){
-  if(!S.cfg.ghToken || S.busy.sync) return;
+let syncing = null;
+function syncGist(force){
+  if(!S.cfg.ghToken) return Promise.resolve();
+  if(syncing) return force ? syncing.then(()=>syncGist(false)) : syncing;
+  syncing = doSyncGist().finally(()=>{ syncing = null; });
+  return syncing;
+}
+async function doSyncGist(){
   S.busy.sync = true; delete S.err.sync; renderStatus();
   try{
     if(!S.cfg.gistId) await findOrCreateGist();
     const remote = await readGist();
-    const merged = merge(remote, S.recs);
-    const changedRemote = JSON.stringify(sortRecs(merged)) !== JSON.stringify(sortRecs(remote));
+    const merged = merge(remote.registros, S.recs);
+    const changedRemote = JSON.stringify(sortRecs(merged)) !== JSON.stringify(sortRecs(remote.registros));
     S.recs = merged; LS.set("recs", S.recs);
-    if(changedRemote || dirty){
-      await gh("/gists/"+S.cfg.gistId, {method:"PATCH", body: JSON.stringify({files:{[GIST_FILE]:{content: JSON.stringify({v:1, registros:sortRecs(S.recs)}, null, 1)}}})});
+    // Credenciales: gana la más reciente (la última que renovó el token)
+    const rc = wipeCred ? null : await openCred(remote.secreto);
+    const localAt = S.tok?.at || 0, remoteAt = rc?.tok?.at || 0;
+    let pushCred = false;
+    if(rc && rc.tok && (remoteAt > localAt || !S.tok)){ const hadTok = !!S.tok; adoptCred(rc); credDirty = false; LS.set("credDirty", false); if(!hadTok){ toast("Strava conectado desde tu otro dispositivo"); setTimeout(()=>syncStrava(true), 50); } }
+    else if(S.tok && S.cfg.clientId && (localAt > remoteAt || !rc || credDirty)) pushCred = true;
+    if(changedRemote || dirty || pushCred || wipeCred){
+      const secreto = wipeCred ? null : pushCred ? await sealCred() : (remote.secreto || await sealCred());
+      await gh("/gists/"+S.cfg.gistId, {method:"PATCH", body: JSON.stringify({files:{[GIST_FILE]:{content: JSON.stringify({v:1, registros:sortRecs(S.recs), secreto}, null, 1)}}})});
+      if(pushCred){ credDirty = false; LS.set("credDirty", false); }
+      if(wipeCred){ wipeCred = false; LS.set("wipeCred", false); }
     }
     dirty = false; LS.set("dirty", false);
     S.syncAt = Date.now(); LS.set("syncAt", S.syncAt);
@@ -560,16 +626,16 @@ function vAjustes(){
       <div class="row"><button class="primary" type="submit">${conn?"Volver a conectar":"Conectar con Strava"}</button>
       ${conn?`<button type="button" data-act="refresh">${S.busy.strava?"Actualizando…":"Actualizar ahora"}</button><button type="button" class="ghost danger" data-act="logout">Desconectar</button>`:""}</div>
     </form>
-    <p class="muted small">El Client Secret y tus tokens se guardan solo en este dispositivo, nunca en GitHub. ${S.stravaAt?`Última actualización: ${fDate(new Date(S.stravaAt))} ${fClock(S.stravaAt)} · ${S.acts.length} actividades.`:""}</p>
+    <p class="muted small">${conn?"La conexión se renueva sola: no tendrás que volver a conectar salvo que pulses Desconectar o quites el acceso desde Strava. ":""}${S.cfg.ghToken?"Con la sincronización activa, tus otros dispositivos se conectan solos (las claves viajan cifradas en tu Gist secreto). ":"El Client Secret y tus tokens se guardan en este dispositivo. "}${S.stravaAt?`Última actualización: ${fDate(new Date(S.stravaAt))} ${fClock(S.stravaAt)} · ${S.acts.length} actividades.`:""}</p>
   </div>
   <div class="card">
     <div class="row between"><h2>Sincronización</h2><span class="pill ${S.cfg.ghToken&&!S.err.sync?"ok":""}">${S.cfg.ghToken?(S.err.sync?"Error":`<i class="dot" style="background:var(--ok)"></i>Activa`):"Desactivada"}</span></div>
-    <p class="small">Tus WODs, marcas y registros de salud se guardan en un <b>Gist secreto</b> de tu cuenta de GitHub. Así los ves igual en el móvil y en el ordenador.</p>
+    <p class="small">Tus WODs, marcas y registros de salud se guardan en un <b>Gist secreto</b> de tu cuenta de GitHub. Así los ves igual en el móvil y en el ordenador. También guarda la conexión con Strava (cifrada), así que en un dispositivo nuevo solo necesitas pegar este token.</p>
     ${S.err.sync?`<div class="banner bad">${esc(S.err.sync.message||"Error al sincronizar")}</div>`:""}
     <details ${S.cfg.ghToken?"":"open"}><summary>Cómo crear el token (una vez)</summary>
       <ol class="small" style="padding-left:18px;display:flex;flex-direction:column;gap:6px;margin:10px 0 0">
         <li>Abre <a href="https://github.com/settings/tokens/new?scopes=gist&description=Cuaderno%20de%20Entreno" target="_blank" rel="noopener">este enlace</a> (ya marca solo el permiso «gist»).</li>
-        <li>En «Expiration» elige «No expiration» o 1 año, y pulsa «Generate token».</li>
+        <li>En «Expiration» elige <b>«No expiration»</b> para que la app no se desconecte nunca, y pulsa «Generate token».</li>
         <li>Copia el token (empieza por <span class="num">ghp_</span>) y pégalo aquí. Haz lo mismo en cada dispositivo (puedes reutilizar el mismo token).</li>
       </ol>
     </details>
@@ -647,7 +713,7 @@ document.addEventListener("click", async e=>{
   const act = a.dataset.act;
   if(act==="refresh") syncStrava(true);
   if(act==="sync") syncGist();
-  if(act==="logout"){ S.tok=null; LS.del("stravaTok"); toast("Strava desconectado"); render(); }
+  if(act==="logout"){ S.tok=null; LS.del("stravaTok"); if(S.cfg.ghToken){ wipeCred=true; LS.set("wipeCred", true); syncGist(true); } toast("Strava desconectado en todos tus dispositivos"); render(); }
   if(act==="ghoff"){ delete S.cfg.ghToken; delete S.cfg.gistId; saveCfg(); render(); }
   if(act==="export"){ const blob = new Blob([JSON.stringify({v:1, registros:S.recs}, null, 1)], {type:"application/json"}); const u = URL.createObjectURL(blob); const l = document.createElement("a"); l.href=u; l.download=`cuaderno-entreno-${today()}.json`; document.body.appendChild(l); l.click(); l.remove(); setTimeout(()=>URL.revokeObjectURL(u), 2000); }
   if(act==="copy"){ const txt = summaryText(); try{ await navigator.clipboard.writeText(txt); toast("Copiado. Pégalo en Claude y añade tu pregunta."); }catch(err){ const ta=$("#copyArea"); ta.hidden=false; ta.value=txt; ta.select(); toast("Selecciona y copia el texto"); } }
@@ -662,7 +728,7 @@ document.addEventListener("submit", e=>{
   const f = e.target.closest("form[data-form]"); if(!f) return;
   e.preventDefault();
   const kind = f.dataset.form, data = Object.fromEntries(new FormData(f).entries());
-  if(kind==="strava"){ S.cfg.clientId = data.clientId.trim(); S.cfg.clientSecret = data.clientSecret.trim(); saveCfg(); location.href = stravaAuthUrl(); return; }
+  if(kind==="strava"){ wipeCred=false; LS.set("wipeCred", false); S.cfg.clientId = data.clientId.trim(); S.cfg.clientSecret = data.clientSecret.trim(); saveCfg(); location.href = stravaAuthUrl(); return; }
   if(kind==="gh"){ S.cfg.ghToken = data.ghToken.trim(); delete S.cfg.gistId; saveCfg(); delete S.err.sync; syncGist().then(()=>{ if(!S.err.sync) toast("Sincronización activada"); }); render(); return; }
   addRec({tipo:kind, ...data});
   f.querySelectorAll("input[id],textarea[id],select[id]").forEach(el=>{ delete S.form[el.id]; });
@@ -679,5 +745,7 @@ render();
   syncGist();
   if(S.tok && (!S.stravaAt || Date.now()-S.stravaAt > 5*60*1000)) syncStrava(false);
 })();
+// Pide al navegador que no borre los datos de la app por falta de espacio
+if(navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(()=>{});
 if("serviceWorker" in navigator && location.protocol==="https:") navigator.serviceWorker.register("sw.js").catch(()=>{});
 })();
