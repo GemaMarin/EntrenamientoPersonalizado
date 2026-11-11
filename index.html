@@ -124,6 +124,28 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .gear svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8}
 #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--nav-h) + 16px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:999px;font-weight:600;font-size:14px;z-index:30;max-width:calc(100% - 32px);text-align:center}
 a.item:hover .t{text-decoration:underline}
+
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.tile.pr{gap:3px;padding:12px 10px}
+.tile.pr .big{font-size:30px;line-height:1}
+@media (max-width:380px){.tile.pr .big{font-size:25px}}
+.ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cd-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.cd{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--c);border-radius:12px;padding:10px 12px;text-decoration:none;color:var(--fg);min-width:0}
+.cd .num{font-size:34px;line-height:1;color:var(--c)}
+.cd-l{display:flex;flex-direction:column;font-size:12.5px;line-height:1.25;min-width:0}
+.cd-l b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px}
+.card.ev{border-top:4px solid var(--c)}
+.cdbig{display:flex;flex-direction:column;align-items:center;background:var(--surface-2);border-radius:12px;padding:8px 12px;flex:none}
+.cdbig .num{font-size:40px;line-height:1;color:var(--c)}
+.cdbig .lab{font-size:12px;color:var(--muted)}
+.btn-photo{display:inline-flex;align-items:center;flex-direction:row;font-size:14px;font-weight:600;color:var(--bg);background:var(--box);border-radius:10px;padding:9px 14px;cursor:pointer}
+.thumbs{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
+.thumb{display:flex;flex-direction:column;gap:4px;align-items:center;flex:none}
+.thumb img{width:96px;height:120px;object-fit:cover;border-radius:8px;border:1px solid var(--line);display:block}
+.phrow{display:flex;flex-direction:column;gap:6px;padding:10px 0;border-top:1px solid var(--line)}
+.phrow:first-child{border-top:0}
+.sugbtn{display:flex;justify-content:space-between;align-items:center;gap:10px;text-align:left;flex-wrap:wrap}
 </style>
 </head>
 <body>
@@ -143,7 +165,7 @@ a.item:hover .t{text-decoration:underline}
     <a href="#resumen" data-v="resumen"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Resumen</a>
     <a href="#correr" data-v="correr"><svg viewBox="0 0 24 24"><circle cx="14" cy="4.5" r="2"/><path d="M6 20l3-5 3 2 1-5 3 3h3M9 11l3-3 3 1"/></svg>Correr</a>
     <a href="#box" data-v="box"><svg viewBox="0 0 24 24"><path d="M2 12h2M20 12h2M5 8v8M19 8v8M8 6v12M16 6v12M8 12h8"/></svg>Box</a>
-    <a href="#salud" data-v="salud"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.5-7 10-7 10z"/></svg>Salud</a>
+    <a href="#objetivos" data-v="objetivos"><svg viewBox="0 0 24 24"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg>Objetivos</a>
     <a href="#plan" data-v="plan"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>Plan</a>
   </div>
 </nav>
