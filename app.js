@@ -566,7 +566,9 @@ function parseWod(raw){
       if(!fecha){ const t = new Date(); let y = t.getFullYear(); if(new Date(y, MESN[m[2]]-1, +m[1]) > t) y--; fecha = `${y}-${pad(MESN[m[2]])}-${pad(+m[1])}`; }
       continue;
     }
-    if(/^(comentarios|resultados|me gusta|ver m[aá]s)\b/i.test(l) || /\b(c\d+\s+)?crossfit\s*[-–·]?\s*(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)/i.test(l)) continue;
+    if(/^(comentarios|resultados)\b/i.test(l)) break;   // fin del post: lo de abajo es el siguiente
+    if(/^(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)\s+\d{1,2}$/i.test(l) || /^de (enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)$/i.test(l)) continue;
+    if(/^(me gusta|ver m[aá]s|mi perfil)\b/i.test(l) || /\b(c\d+\s+)?crossfit\s*[-–·]?\s*(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)/i.test(l)) continue;
     if(!resultado && (m = l.match(/^(\d+\s*R(?:ONDAS?|OUNDS?|DS)?\s*\+\s*\d+\s*(?:REPS?|R)?)$/i) || l.match(/^(?:tiempo|time|result(?:ado)?)?\s*:?\s*(\d{1,2}:\d{2}(?::\d{2})?)$/i) || l.match(/^(\d+\s*(?:RONDAS?|ROUNDS?|REPS?))$/i))){
       resultado = m[1].toUpperCase().replace(/\s+/g," ").replace(/\s*\+\s*/," + "); continue;
     }
@@ -575,7 +577,7 @@ function parseWod(raw){
     if(inAcc && /^(amrap|emom|for time|wod|metcon|strength|fuerza|skill|core|buy in|cash out)\b/i.test(l)) inAcc = false;
     if(inAcc){ acc.push(l); continue; }
     body.push(l);
-    if(!formato){ if(/amrap/i.test(l)) formato="AMRAP"; else if(/\bemom|\be\d+mom/i.test(l)) formato="EMOM"; else if(/for time|\brft\b|\bft\b/i.test(l)) formato="For time"; else if(/hyrox|hybrid|h[ií]brido/i.test(l)) formato="Hyrox / Hybrid"; }
+    if(!formato){ if(/amrap/i.test(l)) formato="AMRAP"; else if(/\bemom|\be\d+mom/i.test(l)) formato="EMOM"; else if(/for time|\brft\b|\bft\b|chipper/i.test(l)) formato="For time"; else if(/hyrox|hybrid|h[ií]brido/i.test(l)) formato="Hyrox / Hybrid"; }
     if(!nombre && /amrap|emom|for time|\brft\b|tabata|chipper|hyrox|hybrid/i.test(l)) nombre = l.replace(/[´'`’]{2}/g,"″").replace(/[´'`’]/g,"′");
   }
   let fuerza = null;
@@ -615,6 +617,7 @@ async function ocrRead(src, fromStrava, fecha){
     const worker = await Tesseract.createWorker(["spa","eng"], 1, {logger: m => { if(m.status==="recognizing text"){ S.ocr.msg = "Leyendo la foto… "+Math.round(m.progress*100)+" %"; const el=$("#ocrMsg"); if(el) el.textContent = S.ocr.msg; } }});
     const { data } = await worker.recognize(input);
     await worker.terminate();
+    if(isPRScreen(data.text)){ const n = savePRs(parsePRs(data.text)); LS.set("recs", S.recs); schedulePush(); S.ocr = {busy:false, msg:`Era una pantalla de marcas: ${n} marca${n===1?"":"s"} de fuerza guardada${n===1?"":"s"} (las repetidas se saltan).`}; location.hash="box"; render(); return; }
     const w = parseWod(data.text); if(!w.fecha && fecha) w.fecha = fecha;
     S.ocr = {busy:false, parsed:w, msg: w.ok ? "Listo. Revisa lo que he leído y pulsa «Guardar WOD»." : "No he podido leer bien la foto. Escribe o corrige el texto a mano."};
     location.hash = "box"; render(); applyParsed(w);
@@ -622,6 +625,55 @@ async function ocrRead(src, fromStrava, fecha){
     S.ocr = {busy:false, msg:"No se pudo leer la foto. Comprueba la conexión (la primera vez descarga el lector) e inténtalo de nuevo."}; render();
   }
 }
+/* ---------- Pantalla de PRs de AimHarder (Perfil → Fuerza) ---------- */
+// El valor con el icono ⚛ es el 1RM estimado por AimHarder (cuadra con la fórmula de Brzycki); las series "3 x 42.0 Kg" son las registradas
+const PR_UI = /^(buscar|fuerza|gimn[aá]stic|cardio|inicio|wod|perfil|men[uú]|mi perfil)\b/i;
+const KGRE = /(?:(\d+)\s*[x×]\s*)?(\d+(?:[.,]\d+)?)\s*K(?:g|q|K)?/gi;
+const LIFT_DICT = ["front rack lunge","front rack lunges","front rack reverse lunges","front squat","back squat","overhead squat","box squat","pause squat","power snatch","hang power snatch","hang squat snatch","squat snatch","hang snatch","snatch","power clean","hang power clean","hang squat clean","hang clean","squat clean","clean and jerk","clean","push jerk","split jerk","jerk","push press","shoulder press","strict press","bench press","floor press","deadlift","sumo deadlift","romanian deadlift","stiff leg deadlift","sumo deadlift high pull","thruster","back reverse lunges","lunges back squat","walking lunges","overhead lunge","hip thrust","good morning","bulgarian split squat","clean pull","snatch pull","snatch balance"];
+const words = t => String(t).toLowerCase().normalize("NFD").replace(/[^a-z\s]/g," ").split(/\s+/).filter(Boolean);
+// Busca el levantamiento conocido más largo dentro del texto, tolerando una palabra "basura" en medio
+function matchLift(txt){
+  const tk = words(txt); let best = null;
+  for(const d of LIFT_DICT){
+    const dt = d.split(" ");
+    for(let s0=0; s0<tk.length; s0++){
+      if(tk[s0]!==dt[0]) continue;
+      let i=1, gaps=0;
+      for(let j=s0+1; j<tk.length && i<dt.length; j++){ if(tk[j]===dt[i]) i++; else if(++gaps>1) break; }
+      if(i===dt.length && (!best || dt.length>best.split(" ").length)) best = d;
+    }
+  }
+  return best;
+}
+const kgVal = raw => /[.,]/.test(raw) ? parseFloat(raw.replace(",", ".")) : (raw.length>=3 ? +raw/10 : +raw);  // AimHarder siempre muestra 1 decimal
+function isPRScreen(raw){ return /gimn[aá]stic|cardio|fuerza/i.test(raw) && [...String(raw).matchAll(KGRE)].length >= 3 && !/amrap|emom|for time|rounds|comentarios/i.test(raw); }
+function parsePRs(raw){
+  const out = []; let names = [], cur = null;
+  String(raw).split(/\n/).map(l=>l.replace(/\s+/g," ").trim()).filter(Boolean).forEach(l=>{
+    if(PR_UI.test(l) || /^\d{1,2}:\d{2}\b/.test(l)) return;
+    const vals = [...l.matchAll(KGRE)];
+    const pre = vals.length ? l.slice(0, vals[0].index) : l;
+    if(!vals.length){ names.push(l); names = names.slice(-3); return; }
+    const lift = matchLift(names.concat(pre).join(" "));
+    if(lift){ cur = {ejercicio: lift, rm:null, sets:[]}; out.push(cur); }
+    else if(names.length){ cur = null; }   // nombre ilegible: mejor no inventar
+    names = [];
+    if(!cur) return;
+    vals.forEach(v => { const kg = kgVal(v[2]); if(!kg || kg>400) return; if(v[1]) cur.sets.push(`${v[1]}×${kg}`); else if(cur.rm==null) cur.rm = kg; });
+  });
+  const seen = new Set();
+  return out.filter(p=>(p.rm || p.sets.length) && !seen.has(p.ejercicio) && seen.add(p.ejercicio)).map(p=>{
+    if(p.rm==null){ const [r,k] = p.sets[0].split("×").map(Number); p.rm = Math.round(k*36/(37-r)*10)/10; } return p; });
+}
+const cap1 = t => t.toLowerCase().replace(/(^|\s)\S/g, c=>c.toUpperCase());
+function savePRs(list){
+  let n = 0;
+  const have = new Set(logs().filter(l=>l.tipo==="marca").map(l=>norm(l.ejercicio)+"|"+parseFloat(l.valor)));
+  list.forEach(p => { const k = norm(p.ejercicio)+"|"+p.rm; if(have.has(k)) return; have.add(k);
+    addRec({tipo:"marca", ejercicio:cap1(p.ejercicio), valor:String(p.rm), unidad:"kg", fecha:today(), nota:`1RM est. AimHarder${p.sets.length?" · series "+p.sets.join(", ")+" kg":""}`, origen:"aimharder"}, true); n++; });
+  return n;
+}
+
 /* ---------- Importación masiva de capturas ---------- */
 const norm = x => String(x||"").toLowerCase().normalize("NFD").replace(/[^a-z0-9]/g,"");
 const wodKey = w => (w.fecha||"")+"|"+norm(w.nombre)+"|"+norm(w.resultado)+"|"+norm(String(w.texto||"").slice(0,60));
@@ -644,6 +696,7 @@ async function bulkImport(files){
     const item = {file:f.name};
     try{
       const { data } = await worker.recognize(f);
+      if(isPRScreen(data.text)){ const n = savePRs(parsePRs(data.text)); item.st = "pr"; S.bulk.prs = (S.bulk.prs||0) + n; S.bulk.items.push(item); S.bulk.done++; S.bulk.msg = `Leyendo ${S.bulk.done} de ${S.bulk.total}…`; render(); continue; }
       const w = parseWod(data.text); item.w = w;
       if(!w.ok) item.st = "ilegible";
       else if(!w.fecha) item.st = "sinfecha";
@@ -657,7 +710,7 @@ async function bulkImport(files){
   LS.set("recs", S.recs); schedulePush();
   S.bulk.busy = false;
   const rev = S.bulk.items.filter(i=>i.st==="sinfecha"||i.st==="ilegible"||i.st==="error").length;
-  S.bulk.msg = `Listo: ${S.bulk.saved} WOD${S.bulk.saved===1?"":"s"} guardado${S.bulk.saved===1?"":"s"}${S.bulk.dup?` · ${S.bulk.dup} ya estaban`:""}${rev?` · ${rev} para revisar abajo`:""}.`;
+  S.bulk.msg = `Listo: ${S.bulk.saved} WOD${S.bulk.saved===1?"":"s"} guardado${S.bulk.saved===1?"":"s"}${S.bulk.prs?` · ${S.bulk.prs} marcas de fuerza`:""}${S.bulk.dup?` · ${S.bulk.dup} ya estaban`:""}${rev?` · ${rev} para revisar abajo`:""}.`;
   render();
 }
 function bulkCard(){
@@ -666,7 +719,7 @@ function bulkCard(){
     <div class="meter"><i style="width:${b.total?b.done/b.total*100:0}%;background:var(--box)"></i></div>
     <p class="small"><b>${esc(b.msg)}</b></p>
     ${!b.busy && b.saved ? `<p class="small muted">${b.items.filter(i=>i.st==="ok"&&i.match).length} asociados a tu sesión de box en Strava de ese día · ${b.items.filter(i=>i.st==="ok"&&!i.match).length} sin sesión en Strava.</p>`:""}
-    ${b.items.map((it,i)=> it.st==="ok"||it.st==="dup" ? "" : `<div class="phrow"><span class="small"><b>${esc(it.file)}</b> · ${it.st==="sinfecha"?"no encuentro la fecha":it.st==="ilegible"?"no se lee bien":"error al leer"}</span>
+    ${b.items.map((it,i)=> it.st==="ok"||it.st==="dup"||it.st==="pr" ? "" : `<div class="phrow"><span class="small"><b>${esc(it.file)}</b> · ${it.st==="sinfecha"?"no encuentro la fecha":it.st==="ilegible"?"no se lee bien":"error al leer"}</span>
       ${it.w && it.w.ok ? `<span class="small muted ell">${esc(it.w.nombre)}${it.w.resultado?" · "+esc(it.w.resultado):""}</span><div class="row"><input id="bk_${i}" type="date" style="width:auto;flex:1"><button type="button" data-bulk-save="${i}">Guardar</button></div>` : `<span class="small muted">Ábrela con «Leer WOD desde foto» y corrige a mano.</span>`}</div>`).join("")}
   </div>`;
   return `<div class="card">
@@ -761,7 +814,7 @@ function vBox(){
   const avgMin = last90.length? last90.reduce((t,s)=>t+s.min,0)/last90.length : 0;
   const perWk = last90.length/(90/7);
   const wods = logs().filter(l=>l.tipo==="wod").sort((a,b)=>b.fecha.localeCompare(a.fecha));
-  const byEx = {}; logs().filter(l=>l.tipo==="marca").forEach(m=>{ (byEx[m.ejercicio]=byEx[m.ejercicio]||[]).push(m); });
+  const byEx = {}; logs().filter(l=>l.tipo==="marca").forEach(m=>{ const k = norm(m.ejercicio); (byEx[k]=byEx[k]||[]).push(m); });
   const o = S.ocr || {}, f = o.parsed?.fuerza;
   return `
   <div class="card">
@@ -788,12 +841,12 @@ function vBox(){
   </div>
   ${photoCard(box)}
   ${wods.length? `<div class="card"><h3>Tus WODs</h3><div class="list">${wods.slice(0,40).map(w=>{ const st = box.find(s=>iso(s.date)===w.fecha);
-    return `<div class="item" style="align-items:start"><span class="badge" style="background:var(--box)">${esc((w.rx||"").slice(0,2).toUpperCase())}</span><div style="min-width:0"><div class="t">${esc(w.nombre)} <span class="muted" style="font-weight:400">· ${esc(w.formato)}</span></div><div class="s">${fDate(parseISO(w.fecha))}${w.resultado?" · <b>"+esc(w.resultado)+"</b>":""}${w.rpe?" · RPE "+esc(w.rpe):""}${st?" · "+fMin(st.min)+" en Strava":""}</div>${w.notas?`<div class="s">${esc(w.notas)}</div>`:""}${w.texto?`<details><summary class="small muted">Ver entreno${w.accesorios?(w.accHecho?" · accesorios hechos":" · accesorios no hechos"):""}</summary><div class="pre small">${esc(w.texto)}</div>${w.accesorios?`<div class="pre small muted" style="margin-top:6px">${w.accHecho?"✓ ":"✗ "}${esc(w.accesorios)}</div>`:""}</details>`:""}</div>${delBtn(w.id)}</div>`; }).join("")}</div></div>`:""}
+    return `<div class="item" style="align-items:start"><span class="badge" style="background:var(--box)">${esc((w.rx||"").slice(0,2).toUpperCase())}</span><div style="min-width:0"><div class="t">${esc(w.nombre)} <span class="muted" style="font-weight:400">· ${esc(w.formato)}</span></div><div class="s">${fDate(parseISO(w.fecha))}${w.rpe?" · RPE "+esc(w.rpe):""}${st?" · "+fMin(st.min)+" en Strava":""}</div>${w.resultado?`<div class="res">${esc(w.resultado)}</div>`:""}${w.notas?`<div class="com">${esc(w.notas)}</div>`:""}${w.texto?`<details><summary class="small muted">Ver entreno${w.accesorios?(w.accHecho?" · accesorios hechos":" · accesorios no hechos"):""}</summary><div class="pre small">${esc(w.texto)}</div>${w.accesorios?`<div class="pre small muted" style="margin-top:6px">${w.accHecho?"✓ ":"✗ "}${esc(w.accesorios)}</div>`:""}</details>`:""}</div>${delBtn(w.id)}</div>`; }).join("")}</div></div>`:""}
   <div class="card">
     <h3>Marcas y benchmarks</h3>
     <p class="muted small">RM, benchmarks (Fran, Cindy…) y ergómetros. Cada ejercicio muestra tu progreso.</p>
     ${fmMarca()}
-    ${Object.keys(byEx).length? `<div class="list">${Object.entries(byEx).map(([ex,arr])=>{ arr.sort((a,b)=>a.fecha.localeCompare(b.fecha)); const l=arr[arr.length-1], f0=arr[0];
+    ${Object.keys(byEx).length? `<div class="list">${Object.entries(byEx).sort((a,b)=>a[1][0].ejercicio.localeCompare(b[1][0].ejercicio)).map(([k,arr])=>{ arr.sort((a,b)=>a.fecha.localeCompare(b.fecha)||(a.creado||0)-(b.creado||0)); const l=arr[arr.length-1], f0=arr[0], ex=l.ejercicio;
       return `<div class="item"><span class="badge" style="background:var(--fg);color:var(--bg)">${arr.length}</span><div style="min-width:0"><div class="t">${esc(ex)}</div><div class="s">${arr.length>1?`${esc(f0.valor)} → `:""}<b>${esc(l.valor)} ${esc(l.unidad)}</b> · ${fDate(parseISO(l.fecha))}${l.nota?" · "+esc(l.nota):""}</div></div>${delBtn(l.id)}</div>`; }).join("")}</div>`:""}
   </div>`;
 }
