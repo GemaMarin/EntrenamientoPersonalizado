@@ -261,7 +261,7 @@ async function doSyncGist(){
     const remote = await readGist();
     const merged = merge(remote.registros, S.recs);
     const changedRemote = JSON.stringify(sortRecs(merged)) !== JSON.stringify(sortRecs(remote.registros));
-    S.recs = merged; LS.set("recs", S.recs);
+    S.recs = merged; if(migrate()) dirty = true; LS.set("recs", S.recs);
     // Credenciales: gana la más reciente (la última que renovó el token)
     const rc = wipeCred ? null : await openCred(remote.secreto);
     const localAt = S.tok?.at || 0, remoteAt = rc?.tok?.at || 0;
@@ -283,6 +283,12 @@ const sortRecs = rs => [...rs].sort((a,b)=>a.id.localeCompare(b.id));
 function schedulePush(){ dirty = true; LS.set("dirty", true); clearTimeout(pushTimer); pushTimer = setTimeout(syncGist, 600); }
 
 const logs = () => S.recs.filter(r=>!r.borrado);
+function migrate(){
+  let ch = false;
+  S.recs.forEach(r => { if(r.tipo==="evento" && !r.borrado && /hybrid madrid open/i.test(r.nombre||"")){
+    Object.assign(r, {nombre:"HYROX Madrid · Doubles Women Open", km:"8", hyrox:"1", notas:"IFEMA · 8 × (1 km + estación) · estaciones repartidas en pareja", mod:Date.now()}); ch = true; } });
+  return ch;
+}
 function addRec(r, quiet){ const now = Date.now(); S.recs.push({id:uid(), creado:now, mod:now, ...r}); if(!quiet){ LS.set("recs", S.recs); schedulePush(); } }
 function delRec(id){ const r = S.recs.find(x=>x.id===id); if(r){ Object.keys(r).forEach(k=>{ if(!["id","tipo","fecha"].includes(k)) delete r[k]; }); r.borrado = true; r.mod = Date.now(); LS.set("recs", S.recs); schedulePush(); } }
 
@@ -342,7 +348,7 @@ function bestByYear(key){
 
 /* ---------- Competiciones y fases ---------- */
 const SUG = [
-  {nombre:"Hybrid Madrid Open · Femenino parejas", fecha:"2027-03-21", clase:"hibrida", km:"", objetivo:"", notas:""},
+  {nombre:"HYROX Madrid · Doubles Women Open", fecha:"2027-03-21", clase:"hibrida", km:"8", objetivo:"", notas:"IFEMA · 8 × (1 km + estación) · estaciones repartidas en pareja", hyrox:"1"},
   {nombre:"Medio Maratón de Madrid", fecha:"2027-04-04", clase:"carrera", km:"21.0975", objetivo:"", notas:""}
 ];
 const eventos = () => logs().filter(l=>l.tipo==="evento").sort((a,b)=>a.fecha.localeCompare(b.fecha));
@@ -1073,6 +1079,36 @@ function timelineSvg(ps){
   g += `<text x="4" y="46">hoy</text>`;
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Fases hasta tus competiciones">${g}</svg>`;
 }
+/* ---------- HYROX: 8 × (1 km de carrera + estación). Pesos Doubles Women Open (pesos oficiales publicados) ---------- */
+const HYROX = [
+  {n:"SkiErg", d:"1000 m", mv:["SkiErg"], mk:/ski/i},
+  {n:"Sled push", d:"50 m · 102 kg", mv:["Trineo"], mk:/sled|trineo/i},
+  {n:"Sled pull", d:"50 m · 78 kg", mv:["Trineo"], mk:/sled pull|arrastre/i},
+  {n:"Burpee broad jumps", d:"80 m", mv:["Burpees"], mk:/broad|bbj|burpee/i},
+  {n:"Remo", d:"1000 m", mv:["Remo (ergómetro)"], mk:/remo|row/i},
+  {n:"Farmers carry", d:"200 m · 2 × 16 kg", mv:["Farmer carry"], mk:/farmer|carry/i},
+  {n:"Sandbag lunges", d:"100 m · 10 kg", mv:["Zancadas"], mk:/lunge|zancada/i},
+  {n:"Wall balls", d:"100 reps · 4 kg", mv:["Wall balls"], mk:/wall ?ball/i}
+];
+function hyroxBlock(){
+  const now = new Date(), wods = logs().filter(l=>l.tipo==="wod" && daysBetween(parseISO(l.fecha),now)<90);
+  const cnt = {}; wods.forEach(w=>Object.keys(Body.analyze(wodText(w)).moves).forEach(m=>cnt[m]=(cnt[m]||0)+1));
+  const marcas = logs().filter(l=>l.tipo==="marca");
+  const runs = allSessions().filter(s=>s.cat==="run" && daysBetween(s.date,now)<28);
+  return `<div class="hyx">
+    <div class="hyx-run"><b>8 × 1 km</b> de carrera, una antes de cada estación. En dobles corréis las dos todos los kilómetros; las estaciones os las repartís como queráis (trabaja una cada vez).</div>
+    <div class="hyx-list">${HYROX.map((st,i)=>{ const c = st.mv.reduce((t,m)=>t+(cnt[m]||0),0), mk = marcas.filter(m=>st.mk.test(m.ejercicio)).sort((a,b)=>b.fecha.localeCompare(a.fecha))[0];
+      const lv = c>=4 ? "ok" : c>=1 ? "warn" : "bad";
+      return `<div class="hyx-st"><span class="hyx-n">${i+1}</span><div style="min-width:0"><b>${st.n}</b><span class="small muted"> · ${st.d}</span>${mk?`<div class="small">Tu marca: <b>${esc(mk.valor)} ${esc(mk.unidad)}</b> <span class="muted">(${esc(mk.ejercicio.replace(/^hybrid\s*·\s*/i,""))})</span></div>`:""}</div><span class="pill ${lv}">${c ? `${c}× en 90 d` : "sin entrenar"}</span></div>`; }).join("")}</div>
+    <p class="muted small">Veces que aparece cada estación en tus WODs de los últimos 90 días (estimación por los nombres de los ejercicios). Carreras en 28 días: ${runs.length}. Pesos oficiales de Doubles Women Open; confirma el reglamento 26/27 en la web de HYROX.</p>
+    <details><summary class="small"><b>Cómo repartir en pareja</b></summary><div class="list small">
+      <div class="check"><span class="box">·</span><div>Wall balls y burpee broad jumps: relevos cortos (10–15 reps o 20 m) para no llegar al fallo. Tras tu mareo del 10 nov, mejor bloques cortos en los burpees.</div></div>
+      <div class="check"><span class="box">·</span><div>Trineos: tramos de 12,5 m (un largo) y que empuje más quien tenga más fuerza de pierna.</div></div>
+      <div class="check"><span class="box">·</span><div>SkiErg y remo: cambios cada 200–250 m o cada minuto, manteniendo un ritmo que podáis sostener.</div></div>
+      <div class="check"><span class="box">·</span><div>Ensayad los cambios: en dobles se pierde mucho tiempo en las transiciones.</div></div>
+    </div></details>
+  </div>`;
+}
 function eventCard(e){
   const d = daysBetween(new Date(), parseISO(e.fecha)), wk = Math.floor(d/7);
   const hib = e.clase==="hibrida", km = +String(e.km||"").replace(",",".");
@@ -1087,6 +1123,8 @@ function eventCard(e){
       <div class="tile"><span class="num">${pred?fTime(pred):"–"}</span><span class="lab">${pred?`predicción hoy · ${fPace(pred/km)}/km`:"sin marcas aún"}</span></div></div>
       ${goal&&pred?`<p class="small">${goal<pred?`Te faltan <b>${fTime(pred-goal)}</b> (${Math.round((pred-goal)/km)} s/km) para tu objetivo. Con ${wk} semanas es ${ (pred-goal)/km <= 12 ? "realista" : (pred-goal)/km <= 20 ? "exigente pero posible" : "muy ambicioso; quizá un objetivo intermedio"}.`:`Tu predicción actual ya está por debajo del objetivo: puedes subir la ambición.`}</p>`:""}
       <p class="muted small">Predicción con la fórmula de Riegel desde tu mejor ${refDist===10?"10K":"media"}; es un cálculo propio, no de Strava.</p>`;
+  } else if(hib && (e.hyrox || /hyrox/i.test(e.nombre))){
+    extra = hyroxBlock();
   } else if(hib){
     extra = `<div class="list">
       <div class="check"><span class="box">1</span><div class="small"><b>Revisa el reglamento:</b> estaciones, pesos de la categoría femenina y cómo se reparte el trabajo en parejas. Apúntalo en las notas.</div></div>
@@ -1335,6 +1373,7 @@ document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState=
 setInterval(()=>{ if(document.visibilityState==="visible") syncGist(); }, 60*1000);
 
 /* ---------- arranque ---------- */
+if(migrate()){ LS.set("recs", S.recs); schedulePush(); }
 render();
 (async ()=>{
   await handleOAuthReturn();
