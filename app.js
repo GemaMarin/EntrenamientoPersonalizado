@@ -567,9 +567,20 @@ const dark = () => matchMedia("(prefers-color-scheme: dark)").matches;
 function baseMap(el, opts={}){
   const m = L.map(el, {zoomControl:false, attributionControl:true, scrollWheelZoom:false, ...opts});
   // Teselas de OpenStreetMap (libres, sin clave). El estilo gris/oscuro se aplica con CSS sobre la capa.
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom:19, attribution:'© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>'}).addTo(m);
+  // OpenStreetMap exige saber desde qué web se pide (solo el dominio). Si falla, se cambia a Esri.
+  const osm = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom:19, referrerPolicy:"strict-origin-when-cross-origin", attribution:'© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>'});
+  let fails = 0, switched = false;
+  osm.on("tileerror", () => { if(++fails < 3 || switched) return; switched = true; m.removeLayer(osm);
+    L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", {maxZoom:19, attribution:"Tiles © Esri — Esri, HERE, Garmin, © OpenStreetMap"}).addTo(m); });
+  // Un mosaico bloqueado llega como imagen (no da error), así que se comprueba antes con una petición
+  osmOk().then(ok => { if(ok) osm.addTo(m); else { switched = true; L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", {maxZoom:19, attribution:"Tiles © Esri — Esri, HERE, Garmin, © OpenStreetMap"}).addTo(m); } });
   L.control.zoom({position:"bottomright"}).addTo(m);
   return m;
+}
+let osmP = null;
+function osmOk(){
+  if(!osmP) osmP = fetch("https://tile.openstreetmap.org/0/0/0.png", {referrerPolicy:"strict-origin-when-cross-origin", cache:"no-store"}).then(r => r.ok).catch(() => false);
+  return osmP;
 }
 const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 // Color por ritmo: lento → frío, rápido → caliente
