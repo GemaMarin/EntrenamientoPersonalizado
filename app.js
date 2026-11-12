@@ -568,7 +568,7 @@ function monthOf(w){
 function parseWod(raw){
   const lines = String(raw).split(/\n/).map(l=>l.replace(/[|•·]+/g," ").replace(/\s+/g," ").trim()
     .replace(/^[^\p{L}\p{N}*]+/u,"").replace(/[\s\-–—·.,:;]+$/u,"").trim()).filter(l=>l.length>1);
-  let fecha=null, formato=null, nombre=null, resultado=null, inAcc=false, afterRes=false; const notas=[], body=[], acc=[];
+  let fecha=null, titleDay=null, formato=null, nombre=null, resultado=null, inAcc=false, afterRes=false; const notas=[], body=[], acc=[];
   const fn = (S.athlete?.firstname||"").toLowerCase();
   for(const l of lines){
     let m;
@@ -580,7 +580,13 @@ function parseWod(raw){
       continue;
     }
     if(/^(comentarios|resultados)\b/i.test(l)) break;   // fin del post: lo de abajo es el siguiente
-    if(/^(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)\s+\d{1,2}$/i.test(l) || /^de (enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)$/i.test(l)) continue;
+    if((m = l.match(/^(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)\s+(\d{1,2})$/i))){ titleDay = +m[1]; continue; }
+    // Pie relativo de AimHarder en posts recientes: "12h", "45 min", "3d", "ayer"
+    if((m = l.match(/^\W*(\d{1,2})\s*(h|min|d)\s*$/i)) || /^\W*ayer\s*$/i.test(l)){
+      if(!fecha){ const n = m ? +m[1] : 1, u = m ? m[2].toLowerCase() : "d"; fecha = iso(new Date(Date.now() - n*(u==="d"?864e5:u==="h"?36e5:6e4))); }
+      continue;
+    }
+    if(/^de (enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)$/i.test(l)) continue;
     // barra de estado del móvil, cabeceras de AimHarder y tu nombre
     if(/^\d{1,2}:\d{2}\s+\S/.test(l) || /mi perfil/i.test(l) || l.length<=3 || (fn && (l.toLowerCase().startsWith(fn) || l.toLowerCase().startsWith(fn.slice(1))) && l.length < fn.length+6)) continue;
     if(/^(me gusta|ver m[aá]s)\b/i.test(l) || /\b(c\d+\s+)?crossfit\s*[-–·:]?\s*(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)/i.test(l)) continue;
@@ -610,12 +616,13 @@ function parseWod(raw){
     const km = nl && (nl.match(new RegExp("(?:"+re+")\\D{0,14}(\\d+(?:[.,]\\d+)?)\\s*kg","i")) || nl.match(/(\d+(?:[.,]\d+)?)\s*kg/i));
     const kg = km ? parseFloat(km[km.length-1].replace(",", ".")) : null;
     fuerza = {ejercicio:name, series:+sm[1], reps:+sm[2], pct: pm ? +pm[1] : null, kg};
-    if(kg) fuerza.rm = pm ? kg/(+pm[1]/100) : kg*(1 + (+sm[2])/30);   // % del RM si lo indica; si no, fórmula de Epley
+    if(kg) fuerza.rm = (+sm[2] <= 12) ? kg*36/(37 - +sm[2]) : (pm ? kg/(+pm[1]/100) : null);   // Brzycki con las reps hechas (no fiarse del %: a veces se carga más)
     break;
   }
   if(!formato) formato = fuerza ? "Fuerza" : null;
+  if(!fecha && titleDay){ const t = new Date(); let d = new Date(t.getFullYear(), t.getMonth(), titleDay); if(d > t) d = new Date(t.getFullYear(), t.getMonth()-1, titleDay); fecha = iso(d); }  // "hace 12h": el título dice el día
   // Nombre genérico ("FOR TIME", "4 ROUNDS FOR TIME", "AMRAP 14′") → añade los ejercicios principales
-  if(nombre && /^(\d+\s*rounds?\s*)?(for time|amrap\s*\d*\W*|emom\s*\d*\W*)\s*:?$/i.test(nombre)){
+  if(nombre && /^(\d+\s*rounds?\s*)?(for time|amrap\s*\d*\W*|emom\s*\d*\W*)\s*:?\s*(\(.*\))?\s*:?$/i.test(nombre)){
     const i0 = body.indexOf(body.find(l=>l.replace(/[´'`’]/g,"′")===nombre || l===nombre));
     const movs = [];
     body.slice(i0+1).forEach(l=>{ const m = l.replace(/\(.*?\)/g,"").replace(/^[\d\s+x×\/.,]*(?:cal|m|kg|reps?)?\b\s*/i,"").trim(); const t = m.toLowerCase().replace(/(^|\s)\S/g,c=>c.toUpperCase());
@@ -774,18 +781,18 @@ function applyParsed(w){
 /* ---------- RM de referencia y calculadora de cargas ---------- */
 // RM que se deduce de un WOD: "BACKSQUAT 6 X 4 (75%)" + comentario "BackSquat 45 kg" → 45 / 0,75 = 60 kg
 function wodLift(w){
-  const txt = String(w.texto||""), notas = String(w.notas||"");
-  const withPct = LIFTS.filter(([re])=> txt.split("\n").some(l=>new RegExp(re,"i").test(l) && /\d{2,3}\s*%/.test(l)));
-  if(!withPct.length) return null;
-  const [re,name] = withPct[0];
-  const line = txt.split("\n").find(l=>new RegExp(re,"i").test(l) && /\d{2,3}\s*%/.test(l));
-  const pct = +line.match(/(\d{2,3})\s*%/)[1];
-  let km = notas.match(new RegExp("(?:"+re+")\\D{0,14}(\\d+(?:[.,]\\d+)?)\\s*kg","i"));
-  if(!km && withPct.length===1) km = notas.match(/(\d+(?:[.,]\d+)?)\s*kg/i);
-  if(!km || pct<40 || pct>100) return null;
-  const kg = parseFloat(km[km.length-1].replace(",", "."));
-  const exact = matchLift(line);   // "POWER CLEAN (75% RM)" → power clean, no "clean" genérico
-  return {ejercicio: exact ? cap1(exact) : name, kg, pct, rm: kg/(pct/100)};
+  const lines = String(w.texto||"").split("\n"), notas = String(w.notas||"");
+  // Línea de fuerza: un levantamiento con series × reps ("BACKSQUAT 4 X 6 (70%RM)", "DEADLIFT 5 X 5")
+  let line = null, lift = null;
+  for(const l of lines){ if(!/\d+\s*[x×]\s*\d+/i.test(l)) continue; const d = matchLift(l); if(d){ line = l; lift = d; break; } }
+  if(!line) return null;
+  const sm = line.match(/(\d+)\s*[x×]\s*(\d+)/i), reps = +sm[2], pm = line.match(/(\d{2,3})\s*%/);
+  const re = lift.split(" ").join("\\s*");
+  let km = notas.match(new RegExp(re+"\\D{0,14}(\\d+(?:[.,]\\d+)?)\\s*kg","i"));
+  if(!km) km = notas.match(/^\D{0,3}(\d+(?:[.,]\d+)?)\s*kg/i);   // "35 kg Wod con…": el primer peso es el de fuerza
+  if(!km || reps>12 || reps<1) return null;
+  const kg = parseFloat(km[1].replace(",", ".").replace("'", "."));
+  return {ejercicio: cap1(lift), kg, reps, pct: pm ? +pm[1] : null, rm: kg*36/(37-reps)};
 }
 function rmTable(){
   const by = {};
@@ -797,7 +804,7 @@ function rmTable(){
     else if(m) push(l.ejercicio, parseFloat(m[1].replace(",", ".")), l.fecha, "estimado de "+(l.nota||"").split("·")[0].trim());
     else push(l.ejercicio, v, l.fecha, "marca apuntada");
   });
-  logs().filter(l=>l.tipo==="wod").forEach(w=>{ const x = wodLift(w); if(x) push(x.ejercicio, x.rm, w.fecha, `WOD del ${fDate(parseISO(w.fecha))}: ${x.kg} kg al ${x.pct} %`); });
+  logs().filter(l=>l.tipo==="wod").forEach(w=>{ const x = wodLift(w); if(x) push(x.ejercicio, x.rm, w.fecha, `WOD del ${fDate(parseISO(w.fecha))}: ${x.kg} kg × ${x.reps}${x.pct?` (marcaba ${x.pct} %)`:""}`); });
   Object.values(by).forEach(e=>{ e.list.sort((a,b)=>b.rm-a.rm); e.best = e.list[0]; });
   return by;
 }
@@ -807,7 +814,7 @@ function calcCard(){
   const k = keys.includes(S.calcEx) ? S.calcEx : (keys.find(x=>x==="backsquat") || keys[0]);
   const e = t[k], rm = e.best.rm, pcts = [50,60,65,70,75,80,85,90,95];
   return `<div class="card"><h3>¿Cuánto me pongo?</h3>
-    <p class="muted small">Elige el ejercicio y mira los kilos para el porcentaje que marque el WOD. Uso tu RM más alto conocido: el PR de AimHarder o el que se deduce de tus WODs.</p>
+    <p class="muted small">Elige el ejercicio y mira los kilos para el porcentaje que marque el WOD. Uso tu RM más alto conocido: el PR de AimHarder o el que sale de los kilos y repeticiones que apuntas en tus WODs (fórmula de Brzycki), sin fiarme del % que marcaba.</p>
     ${field("calc_ex","Ejercicio",`<select id="calc_ex">${keys.map(x=>`<option value="${x}" ${x===k?"selected":""}>${esc(t[x].name)}</option>`).join("")}</select>`)}
     <div class="row" style="align-items:baseline;gap:8px"><span class="num" style="font-size:40px;line-height:1">${rm}</span><span class="small">kg de RM · <span class="muted">${esc(e.best.src)}</span></span></div>
     <div class="pcts">${pcts.map(p=>`<div class="pct${p===70||p===75?" hl":""}"><span class="lab">${p} %</span><span class="num">${Math.round(rm*p/100)}</span></div>`).join("")}</div>
@@ -909,7 +916,7 @@ function vBox(){
       <label class="btn-photo" for="ocrFile">${o.busy?"Leyendo…":"Leer WOD desde foto"}<input id="ocrFile" type="file" accept="image/*" hidden ${o.busy?"disabled":""}></label></div>
     <p class="muted small">Elige la captura de AimHarder (o la foto de la pizarra) y relleno el formulario solo. Las capturas se leen muy bien; la letra a mano de la pizarra, regular: revisa antes de guardar. La foto no sale de tu móvil.</p>
     ${o.msg?`<div class="banner ${o.busy?"info":""}" id="ocrMsg">${esc(o.msg)}</div>`:""}
-    ${f && f.kg ? `<div class="banner info"><b>${esc(f.ejercicio)} ${f.series}×${f.reps}${f.pct?` al ${f.pct} %`:""} con ${f.kg} kg</b> → 1RM estimado ≈ <b>${Math.round(f.rm)} kg</b> <span class="muted">(cálculo propio${f.pct?": carga ÷ porcentaje":", fórmula de Epley"})</span>. <button class="ghost" data-act="sug-marca">Guardar en marcas</button></div>`:""}
+    ${f && f.kg ? `<div class="banner info"><b>${esc(f.ejercicio)} ${f.series}×${f.reps}${f.pct?` al ${f.pct} %`:""} con ${f.kg} kg</b> → 1RM estimado ≈ <b>${Math.round(f.rm)} kg</b> <span class="muted">(cálculo propio con ${f.kg} kg × ${f.reps} reps, fórmula de Brzycki)</span>. <button class="ghost" data-act="sug-marca">Guardar en marcas</button></div>`:""}
     ${fmWod()}${syncHint()}
   </div>
   ${calcCard()}
