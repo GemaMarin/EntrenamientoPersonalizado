@@ -274,7 +274,11 @@ button.big{padding:13px;font-size:16px}
 .rstats{font-size:13px;color:var(--muted)} .rstats b{color:var(--fg);font-family:var(--display);font-size:16px}
 .routesmap{height:280px;border-radius:14px;overflow:hidden;background:var(--surface-2);z-index:0}
 .runmap{height:260px;border-radius:14px;overflow:hidden;background:var(--surface-2);z-index:0}
-.leaflet-container{font-family:var(--body)}
+.leaflet-container{font-family:var(--body);background:var(--surface-2)}
+.leaflet-tile-pane{filter:grayscale(.75) saturate(.7) contrast(.92) brightness(1.05)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) grayscale(.7) brightness(.85) contrast(.9)}}
+:root[data-theme="dark"] .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) grayscale(.7) brightness(.85) contrast(.9)}
+.leaflet-control-attribution{font-size:10px}
 .pscale{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted)}
 .pscale i{flex:1;height:7px;border-radius:999px;background:linear-gradient(90deg,#5B7BFF,#4FB3D9,#F2C14E,#F08A4B,#E0436F)}
 .rstatgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px}

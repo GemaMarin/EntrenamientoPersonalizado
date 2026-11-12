@@ -566,7 +566,8 @@ function loadLeaflet(){
 const dark = () => matchMedia("(prefers-color-scheme: dark)").matches;
 function baseMap(el, opts={}){
   const m = L.map(el, {zoomControl:false, attributionControl:true, scrollWheelZoom:false, ...opts});
-  L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark()?"dark_all":"light_all"}/{z}/{x}/{y}{r}.png`, {maxZoom:19, subdomains:"abcd", attribution:"© OpenStreetMap · © CARTO"}).addTo(m);
+  // Teselas de OpenStreetMap (libres, sin clave). El estilo gris/oscuro se aplica con CSS sobre la capa.
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom:19, attribution:'© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>'}).addTo(m);
   L.control.zoom({position:"bottomright"}).addTo(m);
   return m;
 }
@@ -589,7 +590,8 @@ async function mountRoutes(){
   const color = cssVar("--run") || "#2752D9", lines = [];
   runs.forEach(r => { const pts = decodePoly(r.poly); if(pts.length<2) return;
     const near = Math.hypot(pts[0][0]-home[0], pts[0][1]-home[1]) < 0.3;
-    const pl = L.polyline(pts, {color, weight:3, opacity:.45}).addTo(routesMap);
+    L.polyline(pts, {color:"#fff", weight:6, opacity:.55, interactive:false}).addTo(routesMap);
+    const pl = L.polyline(pts, {color, weight:3, opacity:.75}).addTo(routesMap);
     pl.on("click", () => openSheet("run", r.id));
     if(near) lines.push(pl); });
   const grp = L.featureGroup(lines.length ? lines : []);
@@ -655,13 +657,14 @@ async function mountRunMap(id){
   const ll = x?.s?.ll, v = x?.s?.v;
   if(ll && v && ll.length>2){
     const ok = v.filter(z=>z>0.8), v0 = Math.min(...ok), v1 = Math.max(...ok);
+    L.polyline(ll, {color:"#fff", weight:9, opacity:.9, interactive:false}).addTo(runMap);
     for(let i=1;i<ll.length;i++){ const t = (v[i]-v0)/Math.max(.1, v1-v0); L.polyline([ll[i-1], ll[i]], {color:paceColor(t), weight:5, opacity:.95, lineCap:"round"}).addTo(runMap); }
     runMap.fitBounds(L.latLngBounds(ll), {padding:[18,18]});
     L.circleMarker(ll[0], {radius:6, color:"#fff", weight:2, fillColor:"#1B8A5A", fillOpacity:1}).addTo(runMap);
     L.circleMarker(ll[ll.length-1], {radius:6, color:"#fff", weight:2, fillColor:"#D23F6B", fillOpacity:1}).addTo(runMap);
   } else {
     const pts = decodePoly(x?.poly || r?.poly || "");
-    if(pts.length>1){ L.polyline(pts, {color:cssVar("--run")||"#2752D9", weight:4}).addTo(runMap); runMap.fitBounds(L.latLngBounds(pts), {padding:[18,18]}); }
+    if(pts.length>1){ L.polyline(pts, {color:"#fff", weight:8, opacity:.9}).addTo(runMap); L.polyline(pts, {color:cssVar("--run")||"#2752D9", weight:4}).addTo(runMap); runMap.fitBounds(L.latLngBounds(pts), {padding:[18,18]}); }
     else el.innerHTML = `<p class="small muted" style="padding:12px">Esta carrera no tiene ruta (cinta).</p>`;
   }
 }
