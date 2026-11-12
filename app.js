@@ -283,7 +283,7 @@ const sortRecs = rs => [...rs].sort((a,b)=>a.id.localeCompare(b.id));
 function schedulePush(){ dirty = true; LS.set("dirty", true); clearTimeout(pushTimer); pushTimer = setTimeout(syncGist, 600); }
 
 const logs = () => S.recs.filter(r=>!r.borrado);
-function addRec(r){ const now = Date.now(); S.recs.push({id:uid(), creado:now, mod:now, ...r}); LS.set("recs", S.recs); schedulePush(); }
+function addRec(r, quiet){ const now = Date.now(); S.recs.push({id:uid(), creado:now, mod:now, ...r}); if(!quiet){ LS.set("recs", S.recs); schedulePush(); } }
 function delRec(id){ const r = S.recs.find(x=>x.id===id); if(r){ Object.keys(r).forEach(k=>{ if(!["id","tipo","fecha"].includes(k)) delete r[k]; }); r.borrado = true; r.mod = Date.now(); LS.set("recs", S.recs); schedulePush(); } }
 
 /* =========================================================
@@ -294,7 +294,7 @@ function allSessions(){
     const c = catOf(a.sport||"");
     return { ...a, cat:c, date:localDate(a.start), kcal:S.det[a.id]?.cal||0,
       rpe: a.race || (c==="run" && a.km>=18) ? 8 : RPE_DEF[c], rpeEst:true };
-  }).sort((a,b)=>b.date-a.date);
+  }).filter(s=>s.cat!=="walk").sort((a,b)=>b.date-a.date);   // senderismo y caminatas fuera
 }
 const load = s => s.min * s.rpe;
 function weekBuckets(sessions, nWeeks){
@@ -557,7 +557,7 @@ const LIFTS = [["back ?squat|sentadilla trasera","Back squat"],["front ?squat|se
 function parseWod(raw){
   const lines = String(raw).split(/\n/).map(l=>l.replace(/[|•·]+/g," ").replace(/\s+/g," ").trim()
     .replace(/^[^\p{L}\p{N}*]+/u,"").replace(/[\s\-–—·.,:;]+$/u,"").trim()).filter(l=>l.length>1);
-  let fecha=null, formato=null, nombre=null, resultado=null; const notas=[], body=[];
+  let fecha=null, formato=null, nombre=null, resultado=null, inAcc=false; const notas=[], body=[], acc=[];
   for(const l of lines){
     let m;
     if((m = l.match(/\b(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})\b/))){ fecha = `${m[3]}-${pad(+m[2])}-${pad(+m[1])}`; if(l.replace(m[0],"").trim().length<3) continue; }
@@ -571,6 +571,9 @@ function parseWod(raw){
       resultado = m[1].toUpperCase().replace(/\s+/g," ").replace(/\s*\+\s*/," + "); continue;
     }
     if(/\d\s*kg/i.test(l) && !/\d\s*[x×]\s*\d/i.test(l) && !/[()%]/.test(l) && !/^\d+\s/.test(l)){ notas.push(l); continue; }
+    if(/^\*?\s*(accessor(?:y|ies|ios?)|accesorios?)\b/i.test(l)){ inAcc = true; acc.push(l); continue; }
+    if(inAcc && /^(amrap|emom|for time|wod|metcon|strength|fuerza|skill|core|buy in|cash out)\b/i.test(l)) inAcc = false;
+    if(inAcc){ acc.push(l); continue; }
     body.push(l);
     if(!formato){ if(/amrap/i.test(l)) formato="AMRAP"; else if(/\bemom|\be\d+mom/i.test(l)) formato="EMOM"; else if(/for time|\brft\b|\bft\b/i.test(l)) formato="For time"; else if(/hyrox|hybrid|h[ií]brido/i.test(l)) formato="Hyrox / Hybrid"; }
     if(!nombre && /amrap|emom|for time|\brft\b|tabata|chipper|hyrox|hybrid/i.test(l)) nombre = l.replace(/[´'`’]{2}/g,"″").replace(/[´'`’]/g,"′");
@@ -589,7 +592,7 @@ function parseWod(raw){
     break;
   }
   if(!formato) formato = fuerza ? "Fuerza" : null;
-  return { ok: body.length>0, fecha, formato, resultado, notas: notas.join(" · "), texto: body.join("\n"), fuerza,
+  return { ok: body.length>0, fecha, formato, resultado, notas: notas.join(" · "), texto: body.join("\n"), accesorios: acc.join("\n"), fuerza,
     nombre: nombre || (fuerza ? `${fuerza.ejercicio} ${fuerza.series}×${fuerza.reps}` : (body[0]||"")) };
 }
 let tessP = null;
@@ -619,9 +622,70 @@ async function ocrRead(src, fromStrava, fecha){
     S.ocr = {busy:false, msg:"No se pudo leer la foto. Comprueba la conexión (la primera vez descarga el lector) e inténtalo de nuevo."}; render();
   }
 }
+/* ---------- Importación masiva de capturas ---------- */
+const norm = x => String(x||"").toLowerCase().normalize("NFD").replace(/[^a-z0-9]/g,"");
+const wodKey = w => (w.fecha||"")+"|"+norm(w.nombre)+"|"+norm(w.resultado)+"|"+norm(String(w.texto||"").slice(0,60));
+const boxSessionOn = f => allSessions().find(s=>s.cat==="box" && iso(s.date)===f);
+function wodFromParsed(w){
+  const st = boxSessionOn(w.fecha);
+  return {tipo:"wod", fecha:w.fecha, formato:w.formato||"Otro", nombre:w.nombre||"WOD", texto:w.texto||"", resultado:w.resultado||"", rx:"RX",
+    notas:w.notas||"", accesorios:w.accesorios||"", accHecho:"", rpe:"", stravaId: st?st.id:"", origen:"foto"};
+}
+async function bulkImport(files){
+  files = [...files].filter(f=>/^image\//.test(f.type) || /\.(jpe?g|png|heic|webp)$/i.test(f.name));
+  if(!files.length) return;
+  S.bulk = {total:files.length, done:0, saved:0, dup:0, items:[], busy:true, msg:"Preparando el lector (la primera vez tarda unos segundos)…"}; render();
+  let worker;
+  try{ await loadTess(); worker = await Tesseract.createWorker(["spa","eng"]); }
+  catch(e){ S.bulk.busy=false; S.bulk.msg="No se pudo cargar el lector. Revisa la conexión e inténtalo otra vez."; render(); return; }
+  let wake = null; try{ wake = await navigator.wakeLock?.request("screen"); }catch(e){}
+  const keys = new Set(logs().filter(l=>l.tipo==="wod").map(wodKey));
+  for(const f of files){
+    const item = {file:f.name};
+    try{
+      const { data } = await worker.recognize(f);
+      const w = parseWod(data.text); item.w = w;
+      if(!w.ok) item.st = "ilegible";
+      else if(!w.fecha) item.st = "sinfecha";
+      else if(keys.has(wodKey(w))){ item.st = "dup"; S.bulk.dup++; }
+      else { const r = wodFromParsed(w); addRec(r, true); keys.add(wodKey(w)); item.st = "ok"; item.match = !!r.stravaId; S.bulk.saved++; }
+    }catch(e){ item.st = "error"; }
+    S.bulk.items.push(item); S.bulk.done++; S.bulk.msg = `Leyendo ${S.bulk.done} de ${S.bulk.total}…`; render();
+  }
+  try{ await worker.terminate(); }catch(e){}
+  try{ wake && wake.release(); }catch(e){}
+  LS.set("recs", S.recs); schedulePush();
+  S.bulk.busy = false;
+  const rev = S.bulk.items.filter(i=>i.st==="sinfecha"||i.st==="ilegible"||i.st==="error").length;
+  S.bulk.msg = `Listo: ${S.bulk.saved} WOD${S.bulk.saved===1?"":"s"} guardado${S.bulk.saved===1?"":"s"}${S.bulk.dup?` · ${S.bulk.dup} ya estaban`:""}${rev?` · ${rev} para revisar abajo`:""}.`;
+  render();
+}
+function bulkCard(){
+  const b = S.bulk;
+  const status = !b ? "" : `<div class="stack" style="gap:8px">
+    <div class="meter"><i style="width:${b.total?b.done/b.total*100:0}%;background:var(--box)"></i></div>
+    <p class="small"><b>${esc(b.msg)}</b></p>
+    ${!b.busy && b.saved ? `<p class="small muted">${b.items.filter(i=>i.st==="ok"&&i.match).length} asociados a tu sesión de box en Strava de ese día · ${b.items.filter(i=>i.st==="ok"&&!i.match).length} sin sesión en Strava.</p>`:""}
+    ${b.items.map((it,i)=> it.st==="ok"||it.st==="dup" ? "" : `<div class="phrow"><span class="small"><b>${esc(it.file)}</b> · ${it.st==="sinfecha"?"no encuentro la fecha":it.st==="ilegible"?"no se lee bien":"error al leer"}</span>
+      ${it.w && it.w.ok ? `<span class="small muted ell">${esc(it.w.nombre)}${it.w.resultado?" · "+esc(it.w.resultado):""}</span><div class="row"><input id="bk_${i}" type="date" style="width:auto;flex:1"><button type="button" data-bulk-save="${i}">Guardar</button></div>` : `<span class="small muted">Ábrela con «Leer WOD desde foto» y corrige a mano.</span>`}</div>`).join("")}
+  </div>`;
+  return `<div class="card">
+    <div class="row between"><h3>Importar capturas</h3><label class="btn-photo" for="bulkFiles">${b&&b.busy?"Importando…":"Elegir capturas"}<input id="bulkFiles" type="file" accept="image/*" multiple hidden ${b&&b.busy?"disabled":""}></label></div>
+    <p class="muted small">Selecciona de golpe todas tus capturas de AimHarder. Leo cada una, saco fecha, entreno, resultado y cargas, la asocio a tu sesión de box de Strava de ese día y la guardo. Las repetidas se saltan y los accesorios se guardan aparte como no hechos. Deja la app abierta mientras trabaja (unos segundos por foto).</p>
+    ${status}
+  </div>`;
+}
+function topMoves(wods){
+  const M = [["Wall balls","wall ?balls?"],["Burpees","burpees?"],["Toes to bar","toes ?to ?bar|t2b|ttb"],["Pull-ups","pull[ -]?ups?|dominadas?|c2b|chest to bar"],["Double unders","double ?unders?|\\bdu\\b|dobles"],["Box jumps","box ?jumps?|bjo"],["Thrusters","thrusters?"],["Deadlift","dead ?lifts?|peso muerto"],["Back squat","back ?squat"],["Front squat","front ?squat"],["Clean","\\bclean"],["Snatch","snatch"],["Remo","\\brow|remo"],["SkiErg","\\bski"],["Bike","bike"],["Carrera","\\brun\\b|\\bm run|carrera"],["KB swings","swings?"],["Devil press","devil ?press"],["Lunges","lunges?|zancadas?"],["Push press","push ?press"],["HSPU / pino","hspu|handstand|pino"],["Muscle-ups","muscle[ -]?ups?"],["Sled / trineo","sled|trineo"],["Farmer carry","farmer|carry"]];
+  const c = {};
+  wods.forEach(w=>{ const t = (w.texto||"")+(w.accHecho?"\n"+(w.accesorios||""):""); M.forEach(([n,re])=>{ if(new RegExp(re,"i").test(t)) c[n]=(c[n]||0)+1; }); });
+  return Object.entries(c).sort((a,b)=>b[1]-a[1]).slice(0,10);
+}
+
 function applyParsed(w){
   const set = (id,v) => { const el = document.getElementById(id); if(el && v!=null && v!=="") el.value = v; };
-  set("w_fecha", w.fecha); set("w_nombre", w.nombre); set("w_texto", w.texto); set("w_res", w.resultado); set("w_notas", w.notas);
+  set("w_fecha", w.fecha); set("w_nombre", w.nombre); set("w_texto", w.texto); set("w_res", w.resultado); set("w_notas", w.notas); set("w_acc", w.accesorios);
+  const ah = document.getElementById("w_accH"); if(ah) ah.checked = false;
   if(w.formato){ const sel = document.getElementById("w_formato"); if(sel && [...sel.options].some(o=>o.value===w.formato)) sel.value = w.formato; }
   const f = document.getElementById("w_nombre"); if(f) f.scrollIntoView({block:"center", behavior:"smooth"});
 }
@@ -664,6 +728,8 @@ function fmWod(){ return `<form data-form="wod" id="wodForm">
   <div class="grid2">${field("w_res","Resultado",`<input id="w_res" name="resultado" placeholder="3R + 18 reps · 8:42">`)}
   ${field("w_rx","Nivel",`<select id="w_rx" name="rx"><option>RX</option><option>Scaled</option><option>Adaptado</option></select>`)}</div>
   ${field("w_notas","Cargas y notas",`<input id="w_notas" name="notas" placeholder="Backsquat 45 kg · DB de 10 kg">`)}
+  ${field("w_acc","Accesorios (no cuentan salvo que los marques)",`<textarea id="w_acc" name="accesorios" style="min-height:56px" placeholder="3 sets: 12 hip thrust…"></textarea>`)}
+  <label class="chk" for="w_accH"><input id="w_accH" name="accHecho" type="checkbox" value="1"> Hice los accesorios</label>
   ${field("w_rpe","Esfuerzo percibido (1–10)",`<input id="w_rpe" name="rpe" type="number" min="1" max="10" value="7">`)}
   <button class="primary" type="submit">Guardar WOD</button></form>`; }
 function fmMarca(){ return `<form data-form="marca">
@@ -709,6 +775,9 @@ function vBox(){
     <div class="row" style="gap:4px;align-items:flex-end;height:46px">${b12.map(n=>`<div title="${n} sesiones" style="flex:1;background:var(--box);opacity:${n?0.35+0.65*Math.min(1,n/3):.12};height:${8+n*12}px;border-radius:4px"></div>`).join("")}</div>
     <p class="muted small">Sesiones por semana (últimas 12).</p>
   </div>
+  ${bulkCard()}
+  ${(()=>{ const tm = topMoves(wods); if(tm.length<3) return ""; const mx = tm[0][1];
+    return `<div class="card"><h3>Lo que más haces</h3><p class="muted small">Movimientos que aparecen en tus WODs apuntados (${wods.length}). Sin accesorios salvo los marcados como hechos.</p><div class="stack" style="gap:6px">${tm.map(([n,v])=>`<div class="row" style="gap:8px;flex-wrap:nowrap"><span class="small" style="width:108px;flex:none">${n}</span><div class="meter" style="flex:1"><i style="width:${v/mx*100}%;background:var(--box)"></i></div><span class="num" style="width:26px;text-align:right">${v}</span></div>`).join("")}</div></div>`; })()}
   <div class="card">
     <div class="row between"><h3>Apuntar WOD</h3>
       <label class="btn-photo" for="ocrFile">${o.busy?"Leyendo…":"Leer WOD desde foto"}<input id="ocrFile" type="file" accept="image/*" hidden ${o.busy?"disabled":""}></label></div>
@@ -719,7 +788,7 @@ function vBox(){
   </div>
   ${photoCard(box)}
   ${wods.length? `<div class="card"><h3>Tus WODs</h3><div class="list">${wods.slice(0,40).map(w=>{ const st = box.find(s=>iso(s.date)===w.fecha);
-    return `<div class="item" style="align-items:start"><span class="badge" style="background:var(--box)">${esc((w.rx||"").slice(0,2).toUpperCase())}</span><div style="min-width:0"><div class="t">${esc(w.nombre)} <span class="muted" style="font-weight:400">· ${esc(w.formato)}</span></div><div class="s">${fDate(parseISO(w.fecha))}${w.resultado?" · <b>"+esc(w.resultado)+"</b>":""}${w.rpe?" · RPE "+esc(w.rpe):""}${st?" · "+fMin(st.min)+" en Strava":""}</div>${w.notas?`<div class="s">${esc(w.notas)}</div>`:""}${w.texto?`<details><summary class="small muted">Ver entreno</summary><div class="pre small">${esc(w.texto)}</div></details>`:""}</div>${delBtn(w.id)}</div>`; }).join("")}</div></div>`:""}
+    return `<div class="item" style="align-items:start"><span class="badge" style="background:var(--box)">${esc((w.rx||"").slice(0,2).toUpperCase())}</span><div style="min-width:0"><div class="t">${esc(w.nombre)} <span class="muted" style="font-weight:400">· ${esc(w.formato)}</span></div><div class="s">${fDate(parseISO(w.fecha))}${w.resultado?" · <b>"+esc(w.resultado)+"</b>":""}${w.rpe?" · RPE "+esc(w.rpe):""}${st?" · "+fMin(st.min)+" en Strava":""}</div>${w.notas?`<div class="s">${esc(w.notas)}</div>`:""}${w.texto?`<details><summary class="small muted">Ver entreno${w.accesorios?(w.accHecho?" · accesorios hechos":" · accesorios no hechos"):""}</summary><div class="pre small">${esc(w.texto)}</div>${w.accesorios?`<div class="pre small muted" style="margin-top:6px">${w.accHecho?"✓ ":"✗ "}${esc(w.accesorios)}</div>`:""}</details>`:""}</div>${delBtn(w.id)}</div>`; }).join("")}</div></div>`:""}
   <div class="card">
     <h3>Marcas y benchmarks</h3>
     <p class="muted small">RM, benchmarks (Fran, Cindy…) y ergómetros. Cada ejercicio muestra tu progreso.</p>
@@ -941,6 +1010,10 @@ document.addEventListener("click", async e=>{
     render(); return; }
   const sg = e.target.closest("[data-sug]");
   if(sg){ const x = SUG.find(v=>v.nombre===sg.dataset.sug); if(x){ addRec({tipo:"evento", ...x}); toast("Competición añadida"); render(); } return; }
+  const bs = e.target.closest("[data-bulk-save]");
+  if(bs){ const i = +bs.dataset.bulkSave, it = S.bulk?.items[i], inp = document.getElementById("bk_"+i);
+    if(it && inp && inp.value){ it.w.fecha = inp.value; addRec(wodFromParsed(it.w)); it.st = "ok"; it.match = !!boxSessionOn(inp.value); S.bulk.saved++; toast("WOD guardado"); render(); }
+    else if(inp) inp.focus(); return; }
   const oc = e.target.closest("[data-ocr-url]");
   if(oc){ ocrRead(oc.dataset.ocrUrl, true, oc.dataset.date); return; }
   const a = e.target.closest("[data-act]"); if(!a) return;
@@ -955,6 +1028,7 @@ document.addEventListener("click", async e=>{
 });
 document.addEventListener("change", async e=>{
   if(e.target.id==="ocrFile" && e.target.files[0]){ ocrRead(e.target.files[0], false); return; }
+  if(e.target.id==="bulkFiles" && e.target.files.length){ bulkImport(e.target.files); return; }
   if(e.target.id!=="importFile" || !e.target.files[0]) return;
   try{ const j = JSON.parse(await e.target.files[0].text()); const rs = (j.registros||[]).filter(r=>r && r.id && r.tipo);
     S.recs = merge(S.recs, rs); LS.set("recs", S.recs); schedulePush(); toast(`${rs.length} registros importados`); render(); }
@@ -966,6 +1040,7 @@ document.addEventListener("submit", e=>{
   const kind = f.dataset.form, data = Object.fromEntries(new FormData(f).entries());
   if(kind==="strava"){ wipeCred=false; LS.set("wipeCred", false); S.cfg.clientId = data.clientId.trim(); S.cfg.clientSecret = data.clientSecret.trim(); saveCfg(); location.href = stravaAuthUrl(); return; }
   if(kind==="gh"){ S.cfg.ghToken = data.ghToken.trim(); delete S.cfg.gistId; saveCfg(); delete S.err.sync; syncGist().then(()=>{ if(!S.err.sync) toast("Sincronización activada"); }); render(); return; }
+  if(kind==="wod"){ const st = boxSessionOn(data.fecha); data.stravaId = st ? st.id : ""; data.accHecho = data.accHecho ? "1" : ""; }
   addRec({tipo:kind, ...data});
   if(kind==="wod") S.ocr = null;
   f.querySelectorAll("input[id],textarea[id],select[id]").forEach(el=>{ delete S.form[el.id]; });
