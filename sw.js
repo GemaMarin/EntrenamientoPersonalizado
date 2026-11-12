@@ -1,5 +1,5 @@
 // Service worker: guarda la app para abrirla sin conexión. No toca las llamadas a Strava ni a GitHub.
-const CACHE = "entreno-v5";
+const CACHE = "entreno-v6";
 const SHELL = ["./", "./index.html", "./app.js", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))); self.clients.claim(); });

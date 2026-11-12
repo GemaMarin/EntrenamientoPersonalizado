@@ -554,24 +554,44 @@ function syncHint(){ return S.cfg.ghToken ? "" : `<p class="muted small">Se guar
    ========================================================= */
 const MESN = {enero:1,febrero:2,marzo:3,abril:4,mayo:5,junio:6,julio:7,agosto:8,septiembre:9,setiembre:9,octubre:10,noviembre:11,diciembre:12};
 const LIFTS = [["back ?squat|sentadilla trasera","Back squat"],["front ?squat|sentadilla frontal","Front squat"],["dead ?lift|peso muerto","Deadlift"],["clean ?(?:and|&) ?jerk|c ?& ?j","Clean & jerk"],["power clean|squat clean|\\bclean\\b|cargada","Clean"],["power snatch|squat snatch|\\bsnatch\\b|arrancada","Snatch"],["push press","Push press"],["push jerk|split jerk","Jerk"],["strict press|shoulder press|press militar","Strict press"],["bench press|press banca","Bench press"],["\\bthrusters?\\b","Thruster"],["hip thrust","Hip thrust"],["overhead squat|\\bohs\\b","Overhead squat"]];
+// Mes en español tolerando una letra mal leída por el OCR ("Fnero" → enero)
+function monthOf(w){
+  w = String(w||"").toLowerCase().normalize("NFD").replace(/[^a-z]/g,"");
+  if(MESN[w]) return MESN[w];
+  if(w.length<4) return 0;
+  for(const [k,v] of Object.entries(MESN)){ if(Math.abs(k.length-w.length)>1) continue;
+    const d = Array.from({length:k.length+1},(_,i)=>[i]); for(let j=1;j<=w.length;j++) d[0][j]=j;
+    for(let i=1;i<=k.length;i++) for(let j=1;j<=w.length;j++) d[i][j]=Math.min(d[i-1][j]+1,d[i][j-1]+1,d[i-1][j-1]+(k[i-1]===w[j-1]?0:1));
+    if(d[k.length][w.length]<=1) return v; }
+  return 0;
+}
 function parseWod(raw){
   const lines = String(raw).split(/\n/).map(l=>l.replace(/[|•·]+/g," ").replace(/\s+/g," ").trim()
     .replace(/^[^\p{L}\p{N}*]+/u,"").replace(/[\s\-–—·.,:;]+$/u,"").trim()).filter(l=>l.length>1);
-  let fecha=null, formato=null, nombre=null, resultado=null, inAcc=false; const notas=[], body=[], acc=[];
+  let fecha=null, formato=null, nombre=null, resultado=null, inAcc=false, afterRes=false; const notas=[], body=[], acc=[];
+  const fn = (S.athlete?.firstname||"").toLowerCase();
   for(const l of lines){
     let m;
     if((m = l.match(/\b(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})\b/))){ fecha = `${m[3]}-${pad(+m[2])}-${pad(+m[1])}`; if(l.replace(m[0],"").trim().length<3) continue; }
     if(/^(crossfit|wod|hyrox|hybrid|open box|fuerza|strength)$/i.test(l) || (S.athlete?.firstname && l.toLowerCase()===S.athlete.firstname.toLowerCase())) continue;
-    if((m = l.toLowerCase().match(/\b(\d{1,2})(?: de)? ([a-záéíóú]+)/)) && MESN[m[2]] && l.length<28){
-      if(!fecha){ const t = new Date(); let y = t.getFullYear(); if(new Date(y, MESN[m[2]]-1, +m[1]) > t) y--; fecha = `${y}-${pad(MESN[m[2]])}-${pad(+m[1])}`; }
+    if((m = l.toLowerCase().match(/\b(\d{1,2})(?: de)? ([a-záéíóú]+)/)) && monthOf(m[2]) && l.length<28){
+      const mo = monthOf(m[2]);
+      if(!fecha){ const t = new Date(); let y = t.getFullYear(); if(new Date(y, mo-1, +m[1]) > t) y--; fecha = `${y}-${pad(mo)}-${pad(+m[1])}`; }
       continue;
     }
     if(/^(comentarios|resultados)\b/i.test(l)) break;   // fin del post: lo de abajo es el siguiente
     if(/^(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)\s+\d{1,2}$/i.test(l) || /^de (enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)$/i.test(l)) continue;
-    if(/^(me gusta|ver m[aá]s|mi perfil)\b/i.test(l) || /\b(c\d+\s+)?crossfit\s*[-–·]?\s*(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)/i.test(l)) continue;
+    // barra de estado del móvil, cabeceras de AimHarder y tu nombre
+    if(/^\d{1,2}:\d{2}\s+\S/.test(l) || /mi perfil/i.test(l) || l.length<=3 || (fn && (l.toLowerCase().startsWith(fn) || l.toLowerCase().startsWith(fn.slice(1))) && l.length < fn.length+6)) continue;
+    if(/^(me gusta|ver m[aá]s)\b/i.test(l) || /\b(c\d+\s+)?crossfit\s*[-–·:]?\s*(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)/i.test(l)) continue;
     if(!resultado && (m = l.match(/^(\d+\s*R(?:ONDAS?|OUNDS?|DS)?\s*\+\s*\d+\s*(?:REPS?|R)?)$/i) || l.match(/^(?:tiempo|time|result(?:ado)?)?\s*:?\s*(\d{1,2}:\d{2}(?::\d{2})?)$/i) || l.match(/^(\d+\s*(?:RONDAS?|ROUNDS?|REPS?))$/i))){
-      resultado = m[1].toUpperCase().replace(/\s+/g," ").replace(/\s*\+\s*/," + "); continue;
+      resultado = m[1].toUpperCase().replace(/\s+/g," ").replace(/\s*\+\s*/," + "); afterRes = true; inAcc = false; continue;
     }
+    if(afterRes){
+      if(/\b(inicio|perfil|men[uú])\b/i.test(l)) break;                      // barra inferior de la app
+      if(((l.match(/\p{L}{3,}/gu)||[]).length >= 2) || /\d\s*(kg|lb|cm|m)\b/i.test(l)) notas.push(l);   // descarta iconos sueltos
+      continue;
+    }   // en AimHarder tu comentario va justo debajo del tiempo verde
     if(/\d\s*kg/i.test(l) && !/\d\s*[x×]\s*\d/i.test(l) && !/[()%]/.test(l) && !/^\d+\s/.test(l)){ notas.push(l); continue; }
     if(/^\*?\s*(accessor(?:y|ies|ios?)|accesorios?)\b/i.test(l)){ inAcc = true; acc.push(l); continue; }
     if(inAcc && /^(amrap|emom|for time|wod|metcon|strength|fuerza|skill|core|buy in|cash out)\b/i.test(l)) inAcc = false;
@@ -594,6 +614,14 @@ function parseWod(raw){
     break;
   }
   if(!formato) formato = fuerza ? "Fuerza" : null;
+  // Nombre genérico ("FOR TIME", "4 ROUNDS FOR TIME", "AMRAP 14′") → añade los ejercicios principales
+  if(nombre && /^(\d+\s*rounds?\s*)?(for time|amrap\s*\d*\W*|emom\s*\d*\W*)\s*:?$/i.test(nombre)){
+    const i0 = body.indexOf(body.find(l=>l.replace(/[´'`’]/g,"′")===nombre || l===nombre));
+    const movs = [];
+    body.slice(i0+1).forEach(l=>{ const m = l.replace(/\(.*?\)/g,"").replace(/^[\d\s+x×\/.,]*(?:cal|m|kg|reps?)?\b\s*/i,"").trim(); const t = m.toLowerCase().replace(/(^|\s)\S/g,c=>c.toUpperCase());
+      if(t.length>2 && !movs.includes(t)) movs.push(t); });
+    if(movs.length) nombre = nombre.replace(/:$/,"").trim().replace(/\s+/g," ") + " · " + movs.slice(0,3).join(" / ");
+  }
   return { ok: body.length>0, fecha, formato, resultado, notas: notas.join(" · "), texto: body.join("\n"), accesorios: acc.join("\n"), fuerza,
     nombre: nombre || (fuerza ? `${fuerza.ejercicio} ${fuerza.series}×${fuerza.reps}` : (body[0]||"")) };
 }
