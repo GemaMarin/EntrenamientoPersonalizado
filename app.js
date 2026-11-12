@@ -460,7 +460,7 @@ function stravaBanner(){
   if(S.err.strava) return `<div class="banner bad">${esc(S.err.strava.message||"No se pudo leer Strava.")} ${S.err.strava.code==="auth"?`<a href="#ajustes">Ir a Ajustes</a>`:""}</div>`;
   return "";
 }
-function delBtn(id){ return S.confirmDel===id ? `<span class="row" style="gap:4px"><button class="ghost danger" data-del="${id}" data-sure="1">Borrar</button><button class="ghost" data-del="">No</button></span>` : `<button class="ghost" data-del="${id}" aria-label="Borrar">✕</button>`; }
+function delBtn(id, label){ return S.confirmDel===id ? `<span class="row" style="gap:4px"><button class="ghost danger" data-del="${id}" data-sure="1">Sí, borrar</button><button class="ghost" data-del="">No</button></span>` : `<button class="ghost${label?" danger":""}" data-del="${id}" aria-label="Borrar">${label||"✕"}</button>`; }
 function field(id,label,html){ return `<label for="${id}">${label}${html}</label>`; }
 
 /* =========================================================
@@ -481,7 +481,7 @@ function vResumen(){
   if(sinceRun!=null && sinceRun>=14) alerts.push(`<div class="banner info">Llevas <b>${sinceRun} días</b> sin correr desde «${esc(lastRun.name)}». Para no perder el nivel, vuelve con una salida suave de 30–40 min.</div>`);
   const cats = ["run","box","walk","futbol","otro"].filter(c=>w.some(x=>x[c]>0));
   return `
-  ${countdownStrip()}${stravaBanner()}${alerts.join("")}
+  ${heroCard(ss)}${stravaBanner()}${alerts.join("")}
   <div class="card">
     <div class="row between"><h2>Esta semana</h2><span class="pill"><i class="dot" style="background:${st.ongoing?"var(--ok)":"var(--warn)"}"></i>Racha ${st.n} semana${st.n===1?"":"s"}</span></div>
     ${weekStrip(ss)}
@@ -498,6 +498,7 @@ function vResumen(){
     <div class="meter"><i style="width:${Math.min(100,(A.ratio||0)/2*100)}%;background:var(--${sc[0]==="ok"?"ok":sc[0]==="bad"?"bad":"warn"})"></i></div>
     <p class="muted small">Estimación propia: minutos × esfuerzo. Como Strava no guarda tu RPE, uso valores por defecto (box 7, carrera 6, carreras largas o de competición 8). Orientativo, no predice lesiones.</p>
   </div>
+  ${bodyCard(true)}
   <div class="card"><h3>Minutos por semana</h3>${stackedWeeks(w)}${legend(cats)}</div>
   <div class="card">
     <div class="row between"><h3>Últimas sesiones</h3><span class="muted small">${box28} de box en 28 días</span></div>
@@ -652,10 +653,11 @@ async function ocrRead(src, fromStrava, fecha){
     const worker = await Tesseract.createWorker(["spa","eng"], 1, {logger: m => { if(m.status==="recognizing text"){ S.ocr.msg = "Leyendo la foto… "+Math.round(m.progress*100)+" %"; const el=$("#ocrMsg"); if(el) el.textContent = S.ocr.msg; } }});
     const { data } = await worker.recognize(input);
     await worker.terminate();
-    if(isPRScreen(data.text)){ const n = savePRs(parsePRs(data.text)); LS.set("recs", S.recs); schedulePush(); S.ocr = {busy:false, msg:`Era una pantalla de marcas: ${n} marca${n===1?"":"s"} de fuerza guardada${n===1?"":"s"} (las repetidas se saltan).`}; location.hash="box"; render(); return; }
+    if(isPRScreen(data.text)){ const n = savePRs(parsePRs(data.text)); LS.set("recs", S.recs); schedulePush(); S.ocr = null; toast(`Pantalla de marcas: ${n} marca${n===1?"":"s"} guardada${n===1?"":"s"}`); render(); return; }
     const w = parseWod(data.text); if(!w.fecha && fecha) w.fecha = fecha;
     S.ocr = {busy:false, parsed:w, msg: w.ok ? "Listo. Revisa lo que he leído y pulsa «Guardar WOD»." : "No he podido leer bien la foto. Escribe o corrige el texto a mano."};
-    location.hash = "box"; render(); applyParsed(w);
+    if(location.hash!=="#box") location.hash = "box";
+    render(); openSheet("wod", w);
   }catch(e){
     S.ocr = {busy:false, msg:"No se pudo leer la foto. Comprueba la conexión (la primera vez descarga el lector) e inténtalo de nuevo."}; render();
   }
@@ -758,8 +760,7 @@ function bulkCard(){
       ${it.w && it.w.ok ? `<span class="small muted ell">${esc(it.w.nombre)}${it.w.resultado?" · "+esc(it.w.resultado):""}</span><div class="row"><input id="bk_${i}" type="date" style="width:auto;flex:1"><button type="button" data-bulk-save="${i}">Guardar</button></div>` : `<span class="small muted">Ábrela con «Leer WOD desde foto» y corrige a mano.</span>`}</div>`).join("")}
   </div>`;
   return `<div class="card">
-    <div class="row between"><h3>Importar capturas</h3><label class="btn-photo" for="bulkFiles">${b&&b.busy?"Importando…":"Elegir capturas"}<input id="bulkFiles" type="file" accept="image/*" multiple hidden ${b&&b.busy?"disabled":""}></label></div>
-    <p class="muted small">Selecciona de golpe todas tus capturas de AimHarder. Leo cada una, saco fecha, entreno, resultado y cargas, la asocio a tu sesión de box de Strava de ese día y la guardo. Las repetidas se saltan y los accesorios se guardan aparte como no hechos. Deja la app abierta mientras trabaja (unos segundos por foto).</p>
+    <div class="row between"><h3>Importando capturas</h3>${b && !b.busy?`<button class="ghost" data-act="bulkclose">Cerrar</button>`:""}</div>
     ${status}
   </div>`;
 }
@@ -823,6 +824,15 @@ function calcCard(){
   </div>`;
 }
 
+function heroCard(ss){
+  const ev = futuros(), st = streak(ss), w = weekBuckets(ss,1)[0], mins = w.run+w.box+w.futbol+w.walk+w.otro, cp = currentPhase(), e = ev[0];
+  return `<div class="hero">
+    <div class="row between"><span class="eyebrow">${e?"Próximo objetivo":"Esta semana"}</span><span class="glass">Racha ${st.n} sem</span></div>
+    ${e?`<a class="hero-main" href="#objetivos"><span class="num huge">${daysBetween(new Date(), parseISO(e.fecha))}</span><span class="hero-l"><b>días para</b><span class="hname">${esc(e.nombre)}</span><span class="hdate">${DIAS[dow(parseISO(e.fecha))]} ${fDate(parseISO(e.fecha))}</span></span></a>`:`<a class="hero-main" href="#objetivos"><span class="hero-l"><b>Sin competición</b><span>Añade una en Objetivos</span></span></a>`}
+    ${ev[1]?`<div class="hero-next">Después: <b>${esc(ev[1].nombre)}</b> · ${daysBetween(new Date(), parseISO(ev[1].fecha))} días</div>`:""}
+    <div class="hero-stats"><div><b>${fMin(mins)}</b><span>esta semana</span></div><div><b>${w.n}</b><span>sesiones</span></div><div><b>${cp? cp.info.n : "—"}</b><span>fase</span></div></div>
+  </div>`;
+}
 function countdownStrip(){
   const ev = futuros(); if(!ev.length) return "";
   return `<div class="cd-row">${ev.map(e=>{ const d = daysBetween(new Date(), parseISO(e.fecha));
@@ -840,96 +850,217 @@ function prCard(){
     <div class="grid3">${tile("5k",5)}${tile("10k",10)}${tile("half-marathon",21.0975)}</div>
     ${prog?`<div class="row" style="gap:6px">${prog}</div>`:""}
     ${missing?`<p class="muted small">Analizando tus carreras en Strava: faltan ${missing}. Se completan solas al abrir la app (Strava limita las peticiones).</p>`:`<p class="muted small">Tiempos más rápidos dentro de cualquier carrera registrada en Strava, o tu marca oficial si la añades y es mejor.</p>`}
-    <details><summary class="small">Añadir marca oficial (tiempo de chip)</summary>
-      <form data-form="pr" style="margin-top:10px">
-        <div class="grid2">${field("pr_dist","Distancia",`<select id="pr_dist" name="dist"><option>5K</option><option>10K</option><option selected>21K</option><option>42K</option></select>`)}
-        ${field("pr_t","Tiempo",`<input id="pr_t" name="tiempo" placeholder="1:51:12" required>`)}</div>
-        <div class="grid2">${field("pr_f","Fecha",`<input id="pr_f" name="fecha" type="date" value="${today()}" required>`)}
-        ${field("pr_c","Carrera",`<input id="pr_c" name="carrera" placeholder="Media de Bilbao">`)}</div>
-        <button class="primary" type="submit">Guardar marca oficial</button>
-      </form>
-      ${off.length?`<div class="list">${off.map(l=>`<div class="item"><span class="badge" style="background:var(--run)">${esc(l.dist)}</span><div style="min-width:0"><div class="t">${esc(l.tiempo)} · ${esc(l.carrera||"")}</div><div class="s">${fDate(parseISO(l.fecha))}</div></div>${delBtn(l.id)}</div>`).join("")}</div>`:""}
-    </details>
+    <div class="row between"><button class="addbtn" data-sheet="pr">+ Marca oficial</button></div>
+    ${off.length?`<details><summary class="small">Marcas oficiales (${off.length})</summary><div class="list">${off.map(l=>`<div class="item"><span class="badge" style="background:var(--run)">${esc(l.dist)}</span><div style="min-width:0"><div class="t">${esc(l.tiempo)} · ${esc(l.carrera||"")}</div><div class="s">${fDate(parseISO(l.fecha))}</div></div>${delBtn(l.id)}</div>`).join("")}</div></details>`:""}
   </div>`;
 }
 
-function fmWod(){ return `<form data-form="wod" id="wodForm">
-  <div class="grid2">${field("w_fecha","Fecha",`<input id="w_fecha" name="fecha" type="date" value="${today()}" required>`)}
-  ${field("w_formato","Formato",`<select id="w_formato" name="formato"><option>AMRAP</option><option>For time</option><option>EMOM</option><option>Fuerza</option><option>Hyrox / Hybrid</option><option>Intervalos</option><option>Otro</option></select>`)}</div>
-  ${field("w_nombre","Nombre del WOD",`<input id="w_nombre" name="nombre" placeholder="p. ej. AMRAP 14′, Fran, WOD del día" required>`)}
-  ${field("w_texto","Entreno",`<textarea id="w_texto" name="texto" placeholder="BACKSQUAT 4 X 6 (70%RM)&#10;AMRAP 14′&#10;12 cal echo bike…"></textarea>`)}
-  <div class="grid2">${field("w_res","Resultado",`<input id="w_res" name="resultado" placeholder="3R + 18 reps · 8:42">`)}
-  ${field("w_rx","Nivel",`<select id="w_rx" name="rx"><option>RX</option><option>Scaled</option><option>Adaptado</option></select>`)}</div>
-  ${field("w_notas","Cargas y notas",`<input id="w_notas" name="notas" placeholder="Backsquat 45 kg · DB de 10 kg">`)}
-  ${field("w_acc","Accesorios (no cuentan salvo que los marques)",`<textarea id="w_acc" name="accesorios" style="min-height:56px" placeholder="3 sets: 12 hip thrust…"></textarea>`)}
-  <label class="chk" for="w_accH"><input id="w_accH" name="accHecho" type="checkbox" value="1"> Hice los accesorios</label>
-  ${field("w_rpe","Esfuerzo percibido (1–10)",`<input id="w_rpe" name="rpe" type="number" min="1" max="10" value="7">`)}
-  <button class="primary" type="submit">Guardar WOD</button></form>`; }
-function fmMarca(){ return `<form data-form="marca">
-  <div class="grid2">${field("m_ej","Ejercicio",`<input id="m_ej" name="ejercicio" list="ejercicios" placeholder="Back squat" required>`)}
-  ${field("m_fecha","Fecha",`<input id="m_fecha" name="fecha" type="date" value="${today()}" required>`)}</div>
-  <datalist id="ejercicios">${["Back squat","Front squat","Deadlift","Clean","Snatch","Clean & jerk","Push press","Strict press","Thruster","Hip thrust","Pull-ups máx","Toes to bar máx","Fran","Cindy","Grace","Wall balls 2 min","Remo 500 m","Remo 2 km","SkiErg 1 km","Burpees 3 min"].map(x=>`<option value="${x}">`).join("")}</datalist>
+/* =========================================================
+   FORMULARIOS (se abren en un panel desde abajo)
+   ========================================================= */
+const val = v => esc(v==null ? "" : v);
+const opt = (list, cur) => list.map(o => `<option ${o===cur?"selected":""}>${o}</option>`).join("");
+function fmWod(p={}){ return `<form data-form="wod">
+  <div class="grid2">${field("w_fecha","Fecha",`<input id="w_fecha" name="fecha" type="date" value="${val(p.fecha||today())}" required>`)}
+  ${field("w_formato","Formato",`<select id="w_formato" name="formato">${opt(["AMRAP","For time","EMOM","Fuerza","Hyrox / Hybrid","Intervalos","Otro"], p.formato)}</select>`)}</div>
+  ${field("w_nombre","Nombre del WOD",`<input id="w_nombre" name="nombre" value="${val(p.nombre)}" placeholder="AMRAP 14′, Fran, WOD del día" required>`)}
+  ${field("w_texto","Entreno",`<textarea id="w_texto" name="texto" placeholder="BACKSQUAT 4 X 6 (70%RM)&#10;AMRAP 14′&#10;12 cal echo bike…">${val(p.texto)}</textarea>`)}
+  <div class="grid2">${field("w_res","Resultado",`<input id="w_res" name="resultado" value="${val(p.resultado)}" placeholder="3R + 18 reps · 8:42">`)}
+  ${field("w_rx","Nivel",`<select id="w_rx" name="rx">${opt(["RX","Scaled","Adaptado"], p.rx)}</select>`)}</div>
+  ${field("w_notas","Comentario (cargas, notas)",`<input id="w_notas" name="notas" value="${val(p.notas)}" placeholder="Backsquat 45 kg · DB de 10 kg">`)}
+  <details ${p.accesorios?"open":""}><summary class="small">Accesorios</summary>
+    ${field("w_acc","No cuentan salvo que los marques",`<textarea id="w_acc" name="accesorios" style="min-height:56px">${val(p.accesorios)}</textarea>`)}
+    <label class="chk" for="w_accH"><input id="w_accH" name="accHecho" type="checkbox" value="1"> Hice los accesorios</label>
+  </details>
+  <button class="primary big" type="submit">Guardar WOD</button></form>`; }
+function fmMarca(p={}){ return `<form data-form="marca">
+  ${field("m_ej","Ejercicio",`<input id="m_ej" name="ejercicio" list="ejercicios" value="${val(p.ejercicio)}" placeholder="Back squat" required>`)}
+  <datalist id="ejercicios">${LIFT_DICT.map(x=>`<option value="${cap1(x)}">`).join("")}${["Pull-ups máx","Toes to bar máx","Fran","Cindy","Grace","Wall balls 2 min","Remo 500 m","Remo 2 km","SkiErg 1 km","High Box Jump"].map(x=>`<option value="${x}">`).join("")}</datalist>
   <div class="grid2">${field("m_val","Valor",`<input id="m_val" name="valor" inputmode="decimal" placeholder="60 · 7:45 · 12" required>`)}
-  ${field("m_un","Unidad",`<select id="m_un" name="unidad"><option>kg</option><option>reps</option><option>tiempo</option><option>rondas</option><option>m</option><option>cal</option></select>`)}</div>
-  ${field("m_nota","Nota",`<input id="m_nota" name="nota" placeholder="4×6 al 70 % · 1RM real">`)}
-  <button class="primary" type="submit">Guardar marca</button></form>`; }
+  ${field("m_un","Unidad",`<select id="m_un" name="unidad">${opt(["kg","reps","tiempo","rondas","m","cm","cal"], p.unidad)}</select>`)}</div>
+  <div class="grid2">${field("m_fecha","Fecha",`<input id="m_fecha" name="fecha" type="date" value="${today()}" required>`)}
+  ${field("m_nota","Nota",`<input id="m_nota" name="nota" placeholder="1RM real · 3×42">`)}</div>
+  <button class="primary big" type="submit">Guardar marca</button></form>`; }
+function fmEvento(){ return `<form data-form="evento">
+  ${field("e_n","Nombre",`<input id="e_n" name="nombre" placeholder="Medio Maratón de Madrid" required>`)}
+  <div class="grid2">${field("e_f","Fecha",`<input id="e_f" name="fecha" type="date" required>`)}
+  ${field("e_c","Tipo",`<select id="e_c" name="clase"><option value="carrera">Carrera a pie</option><option value="hibrida">Híbrida / Hyrox</option><option value="otra">Otra</option></select>`)}</div>
+  <div class="grid2">${field("e_km","Distancia (km)",`<input id="e_km" name="km" inputmode="decimal" placeholder="21.0975">`)}
+  ${field("e_o","Tiempo objetivo",`<input id="e_o" name="objetivo" placeholder="1:45:00">`)}</div>
+  ${field("e_no","Notas",`<input id="e_no" name="notas" placeholder="Pareja, categoría, estaciones…">`)}
+  <button class="primary big" type="submit">Guardar competición</button></form>`; }
+function fmPR(){ return `<form data-form="pr">
+  <div class="grid2">${field("pr_dist","Distancia",`<select id="pr_dist" name="dist"><option>5K</option><option>10K</option><option selected>21K</option><option>42K</option></select>`)}
+  ${field("pr_t","Tiempo de chip",`<input id="pr_t" name="tiempo" placeholder="1:51:12" required>`)}</div>
+  <div class="grid2">${field("pr_f","Fecha",`<input id="pr_f" name="fecha" type="date" value="${today()}" required>`)}
+  ${field("pr_c","Carrera",`<input id="pr_c" name="carrera" placeholder="Media de Bilbao">`)}</div>
+  <button class="primary big" type="submit">Guardar marca oficial</button></form>`; }
 
+/* =========================================================
+   CUERPO: músculos trabajados
+   ========================================================= */
+const wodText = w => (w.texto||"") + (w.accHecho ? "\n"+(w.accesorios||"") : "");
+function bodyLoad(days){
+  const now = new Date(), vec = {}, by = {}; let nW = 0, nR = 0;
+  const add = (k,v) => vec[k] = (vec[k]||0) + v;
+  logs().filter(l=>l.tipo==="wod" && (!days || daysBetween(parseISO(l.fecha), now) < days)).forEach(w => {
+    nW++; const a = Body.analyze(wodText(w));
+    Object.entries(a.vec).forEach(([k,v]) => add(k,v));
+    Object.keys(a.moves).forEach(m => { const mv = Body.MOVES.find(x=>x[0]===m); Object.entries(mv[2]).forEach(([k,w8]) => { if(w8>=.5){ by[k] = by[k]||{}; by[k][m] = (by[k][m]||0)+1; } }); });
+  });
+  allSessions().filter(s=>s.cat==="run" && (!days || daysBetween(s.date, now) < days)).forEach(r => {
+    nR++; const f = Math.min(1.5, r.km/8);
+    Object.entries(Body.RUN).forEach(([k,v]) => { add(k, v*f); if(v>=.5){ by[k] = by[k]||{}; by[k]["Carrera (Strava)"] = (by[k]["Carrera (Strava)"]||0)+1; } });
+  });
+  const mx = Math.max(0, ...Object.values(vec));
+  if(mx) Object.keys(vec).forEach(k => vec[k] /= mx);
+  return {vec, by, nW, nR};
+}
+function bodyCard(compact){
+  const days = S.bodyDays ?? 28, L = bodyLoad(days), sel = S.selMus;
+  const ranked = Object.keys(Body.MUSCLES).map(k=>[k, L.vec[k]||0]).sort((a,b)=>b[1]-a[1]);
+  const top = ranked.filter(x=>x[1]>0).slice(0,4), low = ranked.filter(x=>x[1]<.25).slice(-3).reverse();
+  const info = sel ? (()=>{ const v = L.vec[sel]||0, mv = Object.entries(L.by[sel]||{}).sort((a,b)=>b[1]-a[1]);
+      return `<div class="stack" style="gap:6px"><span class="eyebrow">Músculo</span><h3 style="font-size:24px">${Body.MUSCLES[sel].n}</h3>
+        <div class="meter"><i style="width:${v*100}%;background:var(--box)"></i></div><span class="small muted">${Math.round(v*100)} % respecto al más trabajado</span>
+        ${mv.length?`<div class="stack" style="gap:3px">${mv.slice(0,6).map(([m,c])=>`<div class="row between small"><span>${esc(m)}</span><b>${c}×</b></div>`).join("")}</div>`:`<p class="small muted">Sin trabajo en este periodo.</p>`}
+        <button class="ghost" data-act="mus-clear" style="align-self:flex-start">Ver todos</button></div>`; })()
+    : `<div class="stack" style="gap:6px"><span class="eyebrow">Más trabajado</span>
+        ${top.length?top.map(([k,v])=>`<button class="musrow" data-mus="${k}"><span>${Body.MUSCLES[k].n}</span><span class="meter"><i style="width:${v*100}%;background:var(--box)"></i></span></button>`).join(""):`<p class="small muted">Sin entrenos en este periodo.</p>`}
+        ${low.length && top.length?`<span class="eyebrow" style="margin-top:6px">Menos trabajado</span><p class="small">${low.map(([k])=>Body.MUSCLES[k].n).join(", ")}</p>`:""}</div>`;
+  return `<div class="card bodycard">
+    <div class="row between"><h2>${compact?"Tu cuerpo":"Músculos trabajados"}</h2>
+      <div class="seg" role="group" aria-label="Periodo">${[[28,"4 sem"],[90,"3 meses"],[0,"Todo"]].map(([d,t])=>`<button type="button" data-days="${d}" aria-pressed="${days===d}">${t}</button>`).join("")}</div></div>
+    <div class="bodygrid">
+      <div class="stack" style="gap:6px;align-items:center">${Body.flipper(L.vec, {sel, side:S.bodyBack?"b":"f", id:"main"})}
+        <button class="ghost flipbtn" data-act="flip"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>${S.bodyBack?"Ver de frente":"Ver de espaldas"}</button></div>
+      ${info}
+    </div>
+    <div class="row between"><div class="ramp"><span>menos</span>${[0,1,2,3,4].map(i=>`<i class="r${i}"></i>`).join("")}<span>más</span></div><span class="small muted">${L.nW} WOD${L.nW===1?"":"s"} · ${L.nR} carrera${L.nR===1?"":"s"}</span></div>
+    ${compact?"":`<p class="muted small">Estimación propia: cada movimiento de tus WODs (sin accesorios) y tus carreras de Strava suma a los músculos que trabaja. Toca un músculo para ver con qué lo has trabajado.</p>`}
+  </div>`;
+}
+const sideOf = vec => { let f=0, b=0; Object.entries(vec).forEach(([k,v])=>{ const s = Body.MUSCLES[k].v; if(s.includes("f")) f+=v; if(s.includes("b")) b+=v; }); return b>f*1.1 ? "b" : "f"; };
+const topMus = vec => Object.entries(vec).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([k])=>Body.MUSCLES[k].n);
+
+/* =========================================================
+   BOX
+   ========================================================= */
 function photoCard(box){
   const withPh = box.filter(s=>s.photos>0 && daysBetween(s.date,new Date())<90).slice(0,12);
   if(!withPh.length) return "";
   const need = withPh.filter(s=>!S.ph[s.id]).map(s=>s.id);
   if(need.length) setTimeout(()=>fetchPhotos(need), 30);
-  return `<div class="card"><h3>Fotos de tus WODs en Strava</h3>
-    <p class="muted small">Las que subes a Strava. Toca una para verla grande; «Leer» intenta pasarla a texto.</p>
+  return `<details class="card fold"><summary><h3>Fotos de tus WODs en Strava</h3><span class="muted small">${withPh.length}</span></summary>
     <div class="list">${withPh.map(s=>{ const ph = S.ph[s.id]; const done = logs().some(l=>l.tipo==="wod" && l.fecha===iso(s.date));
-      return `<div class="phrow"><div class="row between"><span class="small"><b>${DIAS[dow(s.date)]} ${fDate(s.date)}</b> · ${esc(s.name)}</span>${done?`<span class="pill ok">WOD apuntado</span>`:""}</div>
-      <div class="thumbs">${ph? ph.map(u=>`<div class="thumb"><a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="Foto del entreno" loading="lazy" referrerpolicy="no-referrer"></a><button class="ghost" data-ocr-url="${esc(u)}" data-date="${iso(s.date)}">Leer</button></div>`).join("") : `<span class="muted small">Cargando fotos…</span>`}</div></div>`; }).join("")}</div></div>`;
+      return `<div class="phrow"><div class="row between"><span class="small"><b>${DIAS[dow(s.date)]} ${fDate(s.date)}</b> · ${esc(s.name)}</span>${done?`<span class="pill ok">apuntado</span>`:""}</div>
+      <div class="thumbs">${ph? ph.map(u=>`<div class="thumb"><a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="Foto del entreno" loading="lazy" referrerpolicy="no-referrer"></a><button class="ghost" data-ocr-url="${esc(u)}" data-date="${iso(s.date)}">Leer</button></div>`).join("") : `<span class="muted small">Cargando fotos…</span>`}</div></div>`; }).join("")}</div></details>`;
 }
-
+function wodCard(w){
+  const d = parseISO(w.fecha), a = Body.analyze(wodText(w));
+  return `<button class="wodc" data-wod="${w.id}">
+    <span class="wdate"><b>${d.getDate()}</b><span>${MESES[d.getMonth()]}</span></span>
+    <span class="wbody"><span class="wname">${esc(w.nombre)}</span>
+      ${w.resultado?`<span class="res">${esc(w.resultado)}</span>`:""}
+      ${w.notas?`<span class="com">${esc(w.notas)}</span>`:""}
+      <span class="mchips">${topMus(a.vec).map(n=>`<i>${n}</i>`).join("")}</span></span>
+    <span class="wmini">${Body.figure(sideOf(a.vec), a.vec, {id:w.id})}</span>
+  </button>`;
+}
+function marcasGrid(){
+  const by = {}; logs().filter(l=>l.tipo==="marca").forEach(m=>{ const k = norm(m.ejercicio).replace(/s$/,""); (by[k]=by[k]||[]).push(m); });
+  const rm = rmTable();
+  const items = Object.entries(by).map(([k,arr])=>{ arr.sort((a,b)=>a.fecha.localeCompare(b.fecha)||(a.creado||0)-(b.creado||0)); const l = arr[arr.length-1];
+    const best = rm[k]?.best; return {k, name:l.ejercicio, v:best && /kg/.test(l.unidad) ? best.rm : l.valor, u:l.unidad, n:arr.length, est: best && /kg/.test(l.unidad) && best.src!=="PR de AimHarder" && best.src!=="marca apuntada"}; })
+    .sort((a,b)=>a.name.localeCompare(b.name));
+  if(!items.length) return `<p class="muted small">Aún no hay marcas. Pulsa «+» para añadir una o importa la pantalla de PR de AimHarder.</p>`;
+  return `<div class="mgrid">${items.map(i=>`<button class="mtile" data-marca="${i.k}"><span class="mname">${esc(i.name)}</span><span class="mval"><b>${esc(i.v)}</b> ${esc(i.u)}</span>${i.est?`<span class="mtag">desde WOD</span>`:""}</button>`).join("")}</div>`;
+}
 function vBox(){
   const ss = allSessions(), now = new Date();
   const box = ss.filter(s=>s.cat==="box");
-  const b12 = weekBuckets(box, 12).map(w=>w.n);
   const last90 = box.filter(s=>daysBetween(s.date,now)<90);
-  const avgMin = last90.length? last90.reduce((t,s)=>t+s.min,0)/last90.length : 0;
-  const perWk = last90.length/(90/7);
   const wods = logs().filter(l=>l.tipo==="wod").sort((a,b)=>b.fecha.localeCompare(a.fecha));
-  const byEx = {}; logs().filter(l=>l.tipo==="marca").forEach(m=>{ const k = norm(m.ejercicio); (byEx[k]=byEx[k]||[]).push(m); });
-  const o = S.ocr || {}, f = o.parsed?.fuerza;
+  const shown = S.wodAll ? wods : wods.slice(0,8);
+  const o = S.ocr || {};
   return `
-  <div class="card">
-    <h2>Box · HIIT · Hybrid</h2>
-    <div class="grid4">
-      <div class="tile"><span class="num">${perWk.toFixed(1)}</span><span class="lab">sesiones/semana (90 d)</span></div>
-      <div class="tile"><span class="num">${Math.round(avgMin)}′</span><span class="lab">duración media</span></div>
-      <div class="tile"><span class="num">${wods.length}</span><span class="lab">WODs apuntados</span></div>
-      <div class="tile"><span class="num">${box.length}</span><span class="lab">sesiones en Strava</span></div>
-    </div>
-    <div class="row" style="gap:4px;align-items:flex-end;height:46px">${b12.map(n=>`<div title="${n} sesiones" style="flex:1;background:var(--box);opacity:${n?0.35+0.65*Math.min(1,n/3):.12};height:${8+n*12}px;border-radius:4px"></div>`).join("")}</div>
-    <p class="muted small">Sesiones por semana (últimas 12).</p>
+  ${o.busy || (o.msg && !S.sheetState) ? `<div class="banner ${o.busy?"info":""}" id="ocrMsg">${esc(o.msg)}</div>`:""}
+  ${S.bulk ? bulkCard() : ""}
+  <div class="statrow">
+    <div><span class="num">${(last90.length/(90/7)).toFixed(1)}</span><span class="lab">sesiones / semana</span></div>
+    <div><span class="num">${last90.length? Math.round(last90.reduce((t,s)=>t+s.min,0)/last90.length):0}′</span><span class="lab">duración media</span></div>
+    <div><span class="num">${wods.length}</span><span class="lab">WODs</span></div>
   </div>
-  ${bulkCard()}
-  ${(()=>{ const tm = topMoves(wods); if(tm.length<3) return ""; const mx = tm[0][1];
-    return `<div class="card"><h3>Lo que más haces</h3><p class="muted small">Movimientos que aparecen en tus WODs apuntados (${wods.length}). Sin accesorios salvo los marcados como hechos.</p><div class="stack" style="gap:6px">${tm.map(([n,v])=>`<div class="row" style="gap:8px;flex-wrap:nowrap"><span class="small" style="width:108px;flex:none">${n}</span><div class="meter" style="flex:1"><i style="width:${v/mx*100}%;background:var(--box)"></i></div><span class="num" style="width:26px;text-align:right">${v}</span></div>`).join("")}</div></div>`; })()}
+  ${bodyCard(false)}
   <div class="card">
-    <div class="row between"><h3>Apuntar WOD</h3>
-      <label class="btn-photo" for="ocrFile">${o.busy?"Leyendo…":"Leer WOD desde foto"}<input id="ocrFile" type="file" accept="image/*" hidden ${o.busy?"disabled":""}></label></div>
-    <p class="muted small">Elige la captura de AimHarder (o la foto de la pizarra) y relleno el formulario solo. Las capturas se leen muy bien; la letra a mano de la pizarra, regular: revisa antes de guardar. La foto no sale de tu móvil.</p>
-    ${o.msg?`<div class="banner ${o.busy?"info":""}" id="ocrMsg">${esc(o.msg)}</div>`:""}
-    ${f && f.kg ? `<div class="banner info"><b>${esc(f.ejercicio)} ${f.series}×${f.reps}${f.pct?` al ${f.pct} %`:""} con ${f.kg} kg</b> → 1RM estimado ≈ <b>${Math.round(f.rm)} kg</b> <span class="muted">(cálculo propio con ${f.kg} kg × ${f.reps} reps, fórmula de Brzycki)</span>. <button class="ghost" data-act="sug-marca">Guardar en marcas</button></div>`:""}
-    ${fmWod()}${syncHint()}
+    <div class="row between"><h2>Tus WODs</h2><button class="addbtn" data-sheet="add">+ Añadir</button></div>
+    ${wods.length ? `<div class="wodlist">${shown.map(wodCard).join("")}</div>${wods.length>8?`<button class="ghost" data-act="wodall" style="align-self:center">${S.wodAll?"Ver menos":`Ver los ${wods.length}`}</button>`:""}`
+      : `<p class="small muted">Aún no hay WODs. Pulsa «+ Añadir» para leer una captura de AimHarder o apuntarlo a mano.</p>`}
+  </div>
+  <div class="card">
+    <div class="row between"><h2>Marcas</h2><button class="addbtn" data-sheet="marca">+ Marca</button></div>
+    ${marcasGrid()}
   </div>
   ${calcCard()}
-  ${photoCard(box)}
-  ${wods.length? `<div class="card"><h3>Tus WODs</h3><div class="list">${wods.slice(0,40).map(w=>{ const st = box.find(s=>iso(s.date)===w.fecha);
-    return `<div class="item" style="align-items:start"><span class="badge" style="background:var(--box)">${esc((w.rx||"").slice(0,2).toUpperCase())}</span><div style="min-width:0"><div class="t">${esc(w.nombre)} <span class="muted" style="font-weight:400">· ${esc(w.formato)}</span></div><div class="s">${fDate(parseISO(w.fecha))}${w.rpe?" · RPE "+esc(w.rpe):""}${st?" · "+fMin(st.min)+" en Strava":""}</div>${w.resultado?`<div class="res">${esc(w.resultado)}</div>`:""}${w.notas?`<div class="com">${esc(w.notas)}</div>`:""}${w.texto?`<details><summary class="small muted">Ver entreno${w.accesorios?(w.accHecho?" · accesorios hechos":" · accesorios no hechos"):""}</summary><div class="pre small">${esc(w.texto)}</div>${w.accesorios?`<div class="pre small muted" style="margin-top:6px">${w.accHecho?"✓ ":"✗ "}${esc(w.accesorios)}</div>`:""}</details>`:""}</div>${delBtn(w.id)}</div>`; }).join("")}</div></div>`:""}
-  <div class="card">
-    <h3>Marcas y benchmarks</h3>
-    <p class="muted small">RM, benchmarks (Fran, Cindy…) y ergómetros. Cada ejercicio muestra tu progreso.</p>
-    ${fmMarca()}
-    ${Object.keys(byEx).length? `<div class="list">${Object.entries(byEx).sort((a,b)=>a[1][0].ejercicio.localeCompare(b[1][0].ejercicio)).map(([k,arr])=>{ arr.sort((a,b)=>a.fecha.localeCompare(b.fecha)||(a.creado||0)-(b.creado||0)); const l=arr[arr.length-1], f0=arr[0], ex=l.ejercicio;
-      return `<div class="item"><span class="badge" style="background:var(--fg);color:var(--bg)">${arr.length}</span><div style="min-width:0"><div class="t">${esc(ex)}</div><div class="s">${arr.length>1?`${esc(f0.valor)} → `:""}<b>${esc(l.valor)} ${esc(l.unidad)}</b> · ${fDate(parseISO(l.fecha))}${l.nota?" · "+esc(l.nota):""}</div></div>${delBtn(l.id)}</div>`; }).join("")}</div>`:""}
-  </div>`;
+  ${(()=>{ const tm = topMoves(wods); if(tm.length<3) return ""; const mx = tm[0][1];
+    return `<details class="card fold"><summary><h3>Movimientos más frecuentes</h3><span class="muted small">${wods.length} WODs</span></summary><div class="stack" style="gap:6px">${tm.map(([n,v])=>`<div class="row" style="gap:8px;flex-wrap:nowrap"><span class="small" style="width:108px;flex:none">${n}</span><div class="meter" style="flex:1"><i style="width:${v/mx*100}%;background:var(--box)"></i></div><span class="num" style="width:26px;text-align:right">${v}</span></div>`).join("")}</div></details>`; })()}
+  ${photoCard(box)}`;
+}
+
+/* =========================================================
+   PANEL INFERIOR (sheet)
+   ========================================================= */
+const SHEETS = {
+  add: () => ["Añadir a Box", `<div class="actlist">
+      <label class="act" for="ocrFile"><span class="ico">${ICON.cam}</span><span><b>Leer captura</b><small>Una captura de AimHarder o foto de la pizarra</small></span></label>
+      <label class="act" for="bulkFiles"><span class="ico">${ICON.stack}</span><span><b>Importar varias</b><small>Selecciona muchas capturas a la vez (WODs y PRs)</small></span></label>
+      <button class="act" data-sheet="wod"><span class="ico">${ICON.pen}</span><span><b>Apuntar a mano</b><small>Escribe el WOD y tu resultado</small></span></button>
+      <button class="act" data-sheet="marca"><span class="ico">${ICON.bar}</span><span><b>Nueva marca</b><small>RM, benchmark o ergómetro</small></span></button>
+    </div>${syncHint()}`],
+  wod: p => [p && p.nombre ? "Revisa el WOD" : "Nuevo WOD", `${p && p.fuerza && p.fuerza.kg ? `<div class="banner info small"><b>${esc(p.fuerza.ejercicio)} ${p.fuerza.series}×${p.fuerza.reps} con ${p.fuerza.kg} kg</b> → 1RM estimado ≈ <b>${Math.round(p.fuerza.rm)} kg</b> (Brzycki). <button class="ghost" data-act="sug-marca">Guardar en marcas</button></div>`:""}${fmWod(p||{})}`],
+  marca: p => ["Nueva marca", fmMarca(p||{})],
+  evento: () => ["Nueva competición", fmEvento()],
+  pr: () => ["Marca oficial", fmPR()],
+  wodDetail: id => { const w = logs().find(l=>l.id===id); if(!w) return ["WOD", "<p>Ya no existe.</p>"];
+    const a = Body.analyze(wodText(w)), st = boxSessionOn(w.fecha), d = parseISO(w.fecha);
+    return [w.nombre, `<div class="stack" style="gap:12px">
+      <span class="eyebrow">${DIAS[dow(d)]} ${fDate(d)} ${w.fecha.slice(0,4)} · ${esc(w.formato||"")} · ${esc(w.rx||"")}</span>
+      <div class="row between" style="align-items:flex-end">${w.resultado?`<span class="res big">${esc(w.resultado)}</span>`:"<span></span>"}${st?`<a class="small" href="https://www.strava.com/activities/${st.id}" target="_blank" rel="noopener">Strava · ${fMin(st.min)}</a>`:""}</div>
+      ${w.notas?`<span class="com">${esc(w.notas)}</span>`:""}
+      <div class="twin"><div><span class="eyebrow">Delante</span>${Body.figure("f", a.vec, {id:"df"})}</div><div><span class="eyebrow">Detrás</span>${Body.figure("b", a.vec, {id:"db"})}</div></div>
+      <div class="mchips">${Object.entries(a.vec).sort((x,y)=>y[1]-x[1]).slice(0,7).map(([k])=>`<i>${Body.MUSCLES[k].n}</i>`).join("")}</div>
+      <div class="pre wtext">${esc(w.texto||"")}</div>
+      ${w.accesorios?`<div class="acc"><div class="row between"><b class="small">Accesorios</b><label class="chk small" for="accT"><input id="accT" type="checkbox" data-acc="${w.id}" ${w.accHecho?"checked":""}> Hechos</label></div><div class="pre small muted">${esc(w.accesorios)}</div></div>`:""}
+      <div class="row between">${delBtn(w.id, "Borrar WOD")}<button class="ghost" data-act="close">Cerrar</button></div></div>`]; },
+  marcaDetail: k => { const arr = logs().filter(m=>m.tipo==="marca" && norm(m.ejercicio).replace(/s$/,"")===k).sort((a,b)=>b.fecha.localeCompare(a.fecha)||(b.creado||0)-(a.creado||0));
+    const r = rmTable()[k]; if(!arr.length) return ["Marca","<p>Ya no existe.</p>"];
+    return [arr[0].ejercicio, `<div class="stack" style="gap:12px">
+      ${r?`<div class="row" style="align-items:baseline;gap:8px"><span class="num" style="font-size:44px;line-height:1">${r.best.rm}</span><span class="small">kg de RM · <span class="muted">${esc(r.best.src)}</span></span></div>
+      <div class="pcts">${[60,65,70,75,80,85,90].map(p=>`<div class="pct${p===70||p===75?" hl":""}"><span class="lab">${p} %</span><span class="num">${Math.round(r.best.rm*p/100)}</span></div>`).join("")}</div>`:""}
+      <div class="list">${arr.map(m=>`<div class="item"><span class="num" style="min-width:52px;font-size:20px">${esc(m.valor)}<small class="muted"> ${esc(m.unidad)}</small></span><div style="min-width:0"><div class="s">${fDate(parseISO(m.fecha))} ${m.fecha.slice(0,4)}</div>${m.nota?`<div class="s">${esc(m.nota)}</div>`:""}</div>${delBtn(m.id)}</div>`).join("")}</div>
+      ${r && r.list.length>1?`<details><summary class="small">Referencias de RM (${r.list.length})</summary><div class="list">${r.list.map(x=>`<div class="item"><span class="num" style="width:44px">${x.rm}</span><div class="s">${esc(x.src)}</div><span></span></div>`).join("")}</div></details>`:""}
+      <button class="primary" data-sheet="marca" data-ej="${esc(arr[0].ejercicio)}" data-un="${esc(arr[0].unidad)}">+ Añadir marca de ${esc(arr[0].ejercicio)}</button></div>`]; }
+};
+const ICON = {
+  cam:'<svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>',
+  stack:'<svg viewBox="0 0 24 24"><rect x="6" y="3" width="13" height="15" rx="2"/><path d="M4 7v12a2 2 0 0 0 2 2h10"/></svg>',
+  pen:'<svg viewBox="0 0 24 24"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg>',
+  bar:'<svg viewBox="0 0 24 24"><path d="M2 12h20M5 8v8M19 8v8M8 6v12M16 6v12"/></svg>'
+};
+function openSheet(kind, data){
+  S.sheetState = {kind, data}; renderSheet();
+  const el = $("#sheet"); el.hidden = false; document.body.classList.add("noscroll");
+  requestAnimationFrame(()=>requestAnimationFrame(()=>el.classList.add("open")));
+}
+function closeSheet(){
+  const el = $("#sheet"); if(el.hidden) return;
+  el.classList.remove("open"); document.body.classList.remove("noscroll");
+  setTimeout(()=>{ el.hidden = true; $("#sheetBody").innerHTML = ""; S.sheetState = null; S.confirmDel = null; }, 260);
+}
+function renderSheet(){
+  if(!S.sheetState) return;
+  const [title, html] = SHEETS[S.sheetState.kind](S.sheetState.data);
+  $("#sheetTitle").textContent = title; $("#sheetBody").innerHTML = html;
 }
 
 function timelineSvg(ps){
@@ -942,14 +1073,6 @@ function timelineSvg(ps){
   g += `<text x="4" y="46">hoy</text>`;
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Fases hasta tus competiciones">${g}</svg>`;
 }
-function fmEvento(){ return `<form data-form="evento">
-  ${field("e_n","Nombre",`<input id="e_n" name="nombre" placeholder="Medio Maratón de Madrid" required>`)}
-  <div class="grid2">${field("e_f","Fecha",`<input id="e_f" name="fecha" type="date" required>`)}
-  ${field("e_c","Tipo",`<select id="e_c" name="clase"><option value="carrera">Carrera a pie</option><option value="hibrida">Híbrida / Hyrox</option><option value="otra">Otra</option></select>`)}</div>
-  <div class="grid2">${field("e_km","Distancia (km)",`<input id="e_km" name="km" inputmode="decimal" placeholder="21.0975">`)}
-  ${field("e_o","Tiempo objetivo",`<input id="e_o" name="objetivo" placeholder="1:45:00">`)}</div>
-  ${field("e_no","Notas",`<input id="e_no" name="notas" placeholder="Pareja, categoría, estaciones…">`)}
-  <button class="primary" type="submit">Guardar competición</button></form>`; }
 function eventCard(e){
   const d = daysBetween(new Date(), parseISO(e.fecha)), wk = Math.floor(d/7);
   const hib = e.clase==="hibrida", km = +String(e.km||"").replace(",",".");
@@ -985,7 +1108,8 @@ function vObjetivos(){
   const past = eventos().filter(e=>e.fecha<today());
   const gap = ev.length>1 ? daysBetween(parseISO(ev[0].fecha), parseISO(ev[1].fecha)) : null;
   return `
-  ${!ev.length?`<div class="card"><h2>Tus competiciones</h2><p class="small">Añade tus próximas pruebas y la app organiza las semanas hasta ellas.</p></div>`:""}
+  <div class="row between"><h2>Competiciones</h2><button class="addbtn" data-sheet="evento">+ Competición</button></div>
+  ${!ev.length?`<div class="card"><p class="small">Añade tus próximas pruebas y la app organiza las semanas hasta ellas.</p></div>`:""}
   ${sugs.length?`<div class="card"><h3>Añadir rápido</h3><div class="stack" style="gap:8px">${sugs.map(s=>`<button type="button" class="sugbtn" data-sug="${esc(s.nombre)}"><b>${esc(s.nombre)}</b><span class="muted small">${DIAS[dow(parseISO(s.fecha))]} ${fDate(parseISO(s.fecha))} ${s.fecha.slice(0,4)}</span></button>`).join("")}</div><p class="muted small">Comprueba la fecha en la web oficial; se puede borrar y volver a crear.</p></div>`:""}
   ${ev.map(eventCard).join("")}
   ${ps.length?`<div class="card">
@@ -994,7 +1118,6 @@ function vObjetivos(){
     <div class="list">${ps.map(p=>{ const now = cp && p.start.getTime()===cp.start.getTime(); return `<div class="check"><span class="dot" style="background:${PH[p.key].c};width:12px;height:12px;margin-top:4px"></span><div class="small"><b>${PH[p.key].n}</b> <span class="muted">${fDate(p.start)} – ${fDate(p.end)} · ${Math.max(1,Math.round((daysBetween(p.start,p.end)+1)/7))} sem</span>${now?` <span class="pill ok">ahora</span>`:""}<div class="muted">${PH[p.key].d} Tirada larga ${PH[p.key].long[0]}–${PH[p.key].long[1]} km.</div></div></div>`; }).join("")}</div>
     ${gap!=null && gap<=21?`<p class="small">Entre tus dos pruebas hay solo <b>${gap} días</b>. La híbrida deja las piernas cargadas (sobre todo si hay trineos, zancadas o wall balls), así que la media se prepara de verdad antes de marzo; después de la híbrida toca recuperar y afinar, no entrenar más.</p>`:""}
   </div>`:""}
-  <div class="card"><h3>Nueva competición</h3>${fmEvento()}</div>
   ${past.length?`<div class="card"><h3>Pasadas</h3><div class="list">${past.reverse().map(e=>`<div class="item"><span class="badge" style="background:var(--other)">${e.clase==="hibrida"?"HYB":"RUN"}</span><div style="min-width:0"><div class="t">${esc(e.nombre)}</div><div class="s">${fDate(parseISO(e.fecha))} ${e.fecha.slice(0,4)}</div></div>${delBtn(e.id)}</div>`).join("")}</div></div>`:""}`;
 }
 
@@ -1138,10 +1261,23 @@ function toast(m){ const t=$("#toast"); t.textContent=m; t.hidden=false; clearTi
    ========================================================= */
 window.addEventListener("hashchange", ()=>{ window.scrollTo(0,0); S.confirmDel=null; render(); });
 document.addEventListener("click", async e=>{
+  if(Date.now()-swipedAt < 400 && e.target.closest("[data-flip]")) return;   // fue un deslizamiento, no un toque
+  if(e.target.closest("[data-close]")){ closeSheet(); return; }
+  const inSheet = !!e.target.closest("#sheet");
   const d = e.target.closest("[data-del]");
-  if(d){ const id=d.dataset.del; if(!id){ S.confirmDel=null; render(); return; }
-    if(d.dataset.sure){ delRec(id); S.confirmDel=null; toast("Borrado"); } else S.confirmDel=id;
-    render(); return; }
+  if(d){ const id=d.dataset.del; if(!id){ S.confirmDel=null; render(); renderSheet(); return; }
+    if(d.dataset.sure){ delRec(id); S.confirmDel=null; toast("Borrado"); if(inSheet) closeSheet(); } else S.confirmDel=id;
+    render(); if(inSheet && S.confirmDel) renderSheet(); return; }
+  const sh = e.target.closest("[data-sheet]");
+  if(sh){ const k = sh.dataset.sheet; openSheet(k, k==="marca" && sh.dataset.ej ? {ejercicio:sh.dataset.ej, unidad:sh.dataset.un} : null); return; }
+  const wd = e.target.closest("[data-wod]");
+  if(wd){ S.detBack = false; openSheet("wodDetail", wd.dataset.wod); return; }
+  const mk = e.target.closest("[data-marca]");
+  if(mk){ openSheet("marcaDetail", mk.dataset.marca); return; }
+  const ms = e.target.closest("[data-mus]");
+  if(ms && !inSheet){ S.selMus = S.selMus===ms.dataset.mus ? null : ms.dataset.mus; render(); return; }
+  const dy = e.target.closest("[data-days]");
+  if(dy){ S.bodyDays = +dy.dataset.days; render(); return; }
   const sg = e.target.closest("[data-sug]");
   if(sg){ const x = SUG.find(v=>v.nombre===sg.dataset.sug); if(x){ addRec({tipo:"evento", ...x}); toast("Competición añadida"); render(); } return; }
   const bs = e.target.closest("[data-bulk-save]");
@@ -1152,18 +1288,25 @@ document.addEventListener("click", async e=>{
   if(oc){ ocrRead(oc.dataset.ocrUrl, true, oc.dataset.date); return; }
   const a = e.target.closest("[data-act]"); if(!a) return;
   const act = a.dataset.act;
+  if(act==="flip"){ S.bodyBack = !S.bodyBack; const c = a.closest(".bodycard"); c.querySelector(".flip-in").classList.toggle("back", S.bodyBack); a.lastChild.textContent = S.bodyBack ? "Ver de frente" : "Ver de espaldas"; return; }
+  if(act==="flipd"){ S.detBack = !S.detBack; $("#sheet .flip-in").classList.toggle("back", S.detBack); return; }
+  if(act==="mus-clear"){ S.selMus = null; render(); return; }
+  if(act==="wodall"){ S.wodAll = !S.wodAll; render(); return; }
+  if(act==="close"){ closeSheet(); return; }
+  if(act==="bulkclose"){ S.bulk = null; render(); return; }
   if(act==="refresh") syncStrava(true);
   if(act==="sync") syncGist();
-  if(act==="sug-marca"){ const f = S.ocr?.parsed?.fuerza; if(f){ addRec({tipo:"marca", ejercicio:f.ejercicio, valor:String(f.kg), unidad:"kg", fecha:S.ocr.parsed.fecha||today(), nota:`${f.series}×${f.reps}${f.pct?` al ${f.pct} %`:""} · 1RM est. ${Math.round(f.rm)} kg`}); S.ocr.parsed.fuerza = null; toast("Marca guardada"); render(); } }
+  if(act==="sug-marca"){ const f = S.ocr?.parsed?.fuerza; if(f){ addRec({tipo:"marca", ejercicio:f.ejercicio, valor:String(f.kg), unidad:"kg", fecha:S.ocr.parsed.fecha||today(), nota:`${f.series}×${f.reps}${f.pct?` al ${f.pct} %`:""} · 1RM est. ${Math.round(f.rm)} kg`}); S.ocr.parsed.fuerza = null; a.closest(".banner")?.remove(); toast("Marca guardada"); render(); } }
   if(act==="logout"){ S.tok=null; LS.del("stravaTok"); if(S.cfg.ghToken){ wipeCred=true; LS.set("wipeCred", true); syncGist(true); } toast("Strava desconectado en todos tus dispositivos"); render(); }
   if(act==="ghoff"){ delete S.cfg.ghToken; delete S.cfg.gistId; saveCfg(); render(); }
   if(act==="export"){ const blob = new Blob([JSON.stringify({v:1, registros:S.recs}, null, 1)], {type:"application/json"}); const u = URL.createObjectURL(blob); const l = document.createElement("a"); l.href=u; l.download=`cuaderno-entreno-${today()}.json`; document.body.appendChild(l); l.click(); l.remove(); setTimeout(()=>URL.revokeObjectURL(u), 2000); }
   if(act==="copy"){ const txt = summaryText(); try{ await navigator.clipboard.writeText(txt); toast("Copiado. Pégalo en Claude y añade tu pregunta."); }catch(err){ const ta=$("#copyArea"); ta.hidden=false; ta.value=txt; ta.select(); toast("Selecciona y copia el texto"); } }
 });
 document.addEventListener("change", async e=>{
-  if(e.target.id==="ocrFile" && e.target.files[0]){ ocrRead(e.target.files[0], false); return; }
-  if(e.target.id==="bulkFiles" && e.target.files.length){ bulkImport(e.target.files); return; }
+  if(e.target.id==="ocrFile" && e.target.files[0]){ const f = e.target.files[0]; e.target.value = ""; closeSheet(); ocrRead(f, false); return; }
+  if(e.target.id==="bulkFiles" && e.target.files.length){ const fs = [...e.target.files]; e.target.value = ""; closeSheet(); if(location.hash!=="#box") location.hash = "box"; bulkImport(fs); return; }
   if(e.target.id==="calc_ex"){ S.calcEx = e.target.value; render(); return; }
+  if(e.target.dataset.acc){ const r = S.recs.find(x=>x.id===e.target.dataset.acc); if(r){ r.accHecho = e.target.checked ? "1" : ""; r.mod = Date.now(); LS.set("recs", S.recs); schedulePush(); render(); toast(e.target.checked ? "Accesorios hechos" : "Accesorios sin hacer"); } return; }
   if(e.target.id!=="importFile" || !e.target.files[0]) return;
   try{ const j = JSON.parse(await e.target.files[0].text()); const rs = (j.registros||[]).filter(r=>r && r.id && r.tipo);
     S.recs = merge(S.recs, rs); LS.set("recs", S.recs); schedulePush(); toast(`${rs.length} registros importados`); render(); }
@@ -1179,8 +1322,15 @@ document.addEventListener("submit", e=>{
   addRec({tipo:kind, ...data});
   if(kind==="wod") S.ocr = null;
   f.querySelectorAll("input[id],textarea[id],select[id]").forEach(el=>{ delete S.form[el.id]; });
-  toast("Guardado"); render();
+  if(f.closest("#sheet")) closeSheet();
+  toast(kind==="wod" ? "WOD guardado" : kind==="evento" ? "Competición guardada" : "Guardado"); render();
 });
+document.addEventListener("keydown", e=>{ if(e.key==="Escape") closeSheet(); if((e.key==="Enter"||e.key===" ") && e.target.matches("[data-mus]")){ e.preventDefault(); e.target.click(); } });
+// Girar el cuerpo deslizando el dedo
+let swipeX = null, swipedAt = 0;
+document.addEventListener("pointerdown", e=>{ if(e.target.closest("[data-flip]")) swipeX = e.clientX; });
+document.addEventListener("pointerup", e=>{ if(swipeX==null) return; const dx = e.clientX - swipeX; swipeX = null;
+  if(Math.abs(dx) > 40){ swipedAt = Date.now(); const inS = !!e.target.closest("#sheet"); const b = inS ? $('#sheet [data-act="flipd"]') : $('.bodycard [data-act="flip"]'); b && b.click(); } });
 document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="visible"){ syncGist(); if(!S.stravaAt || Date.now()-S.stravaAt > 10*60*1000) syncStrava(false); } });
 setInterval(()=>{ if(document.visibilityState==="visible") syncGist(); }, 60*1000);
 

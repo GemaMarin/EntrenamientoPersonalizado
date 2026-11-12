@@ -29,5 +29,6 @@ Este repositorio solo contiene el código. Ningún dato personal se guarda aquí
 |---|---|
 | `index.html` | Estructura y estilos |
 | `app.js` | Lógica: Strava API, sincronización con Gist, vistas |
+| `body.js` | Figura del cuerpo (SVG) y mapa movimiento → músculos |
 | `sw.js` | Service worker para abrirla sin conexión |
 | `manifest.webmanifest` | Nombre e iconos al instalarla |
