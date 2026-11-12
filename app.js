@@ -771,6 +771,51 @@ function applyParsed(w){
   const f = document.getElementById("w_nombre"); if(f) f.scrollIntoView({block:"center", behavior:"smooth"});
 }
 
+/* ---------- RM de referencia y calculadora de cargas ---------- */
+// RM que se deduce de un WOD: "BACKSQUAT 6 X 4 (75%)" + comentario "BackSquat 45 kg" → 45 / 0,75 = 60 kg
+function wodLift(w){
+  const txt = String(w.texto||""), notas = String(w.notas||"");
+  const withPct = LIFTS.filter(([re])=> txt.split("\n").some(l=>new RegExp(re,"i").test(l) && /\d{2,3}\s*%/.test(l)));
+  if(!withPct.length) return null;
+  const [re,name] = withPct[0];
+  const line = txt.split("\n").find(l=>new RegExp(re,"i").test(l) && /\d{2,3}\s*%/.test(l));
+  const pct = +line.match(/(\d{2,3})\s*%/)[1];
+  let km = notas.match(new RegExp("(?:"+re+")\\D{0,14}(\\d+(?:[.,]\\d+)?)\\s*kg","i"));
+  if(!km && withPct.length===1) km = notas.match(/(\d+(?:[.,]\d+)?)\s*kg/i);
+  if(!km || pct<40 || pct>100) return null;
+  const kg = parseFloat(km[km.length-1].replace(",", "."));
+  const exact = matchLift(line);   // "POWER CLEAN (75% RM)" → power clean, no "clean" genérico
+  return {ejercicio: exact ? cap1(exact) : name, kg, pct, rm: kg/(pct/100)};
+}
+function rmTable(){
+  const by = {};
+  const push = (name, rm, fecha, src) => { if(!rm || !isFinite(rm)) return; const k = norm(name).replace(/s$/,"");
+    (by[k] = by[k] || {name, list:[]}).list.push({rm:Math.round(rm*10)/10, fecha, src}); };
+  logs().filter(l=>l.tipo==="marca" && /kg/i.test(l.unidad||"")).forEach(l=>{
+    const v = parseFloat(String(l.valor).replace(",", ".")), m = String(l.nota||"").match(/1RM est\.?\s*(\d+(?:[.,]\d+)?)/i);
+    if(/aimharder/i.test(l.nota||"")) push(l.ejercicio, v, l.fecha, "PR de AimHarder");
+    else if(m) push(l.ejercicio, parseFloat(m[1].replace(",", ".")), l.fecha, "estimado de "+(l.nota||"").split("·")[0].trim());
+    else push(l.ejercicio, v, l.fecha, "marca apuntada");
+  });
+  logs().filter(l=>l.tipo==="wod").forEach(w=>{ const x = wodLift(w); if(x) push(x.ejercicio, x.rm, w.fecha, `WOD del ${fDate(parseISO(w.fecha))}: ${x.kg} kg al ${x.pct} %`); });
+  Object.values(by).forEach(e=>{ e.list.sort((a,b)=>b.rm-a.rm); e.best = e.list[0]; });
+  return by;
+}
+function calcCard(){
+  const t = rmTable(), keys = Object.keys(t).sort((a,b)=>t[a].name.localeCompare(t[b].name));
+  if(!keys.length) return "";
+  const k = keys.includes(S.calcEx) ? S.calcEx : (keys.find(x=>x==="backsquat") || keys[0]);
+  const e = t[k], rm = e.best.rm, pcts = [50,60,65,70,75,80,85,90,95];
+  return `<div class="card"><h3>¿Cuánto me pongo?</h3>
+    <p class="muted small">Elige el ejercicio y mira los kilos para el porcentaje que marque el WOD. Uso tu RM más alto conocido: el PR de AimHarder o el que se deduce de tus WODs.</p>
+    ${field("calc_ex","Ejercicio",`<select id="calc_ex">${keys.map(x=>`<option value="${x}" ${x===k?"selected":""}>${esc(t[x].name)}</option>`).join("")}</select>`)}
+    <div class="row" style="align-items:baseline;gap:8px"><span class="num" style="font-size:40px;line-height:1">${rm}</span><span class="small">kg de RM · <span class="muted">${esc(e.best.src)}</span></span></div>
+    <div class="pcts">${pcts.map(p=>`<div class="pct${p===70||p===75?" hl":""}"><span class="lab">${p} %</span><span class="num">${Math.round(rm*p/100)}</span></div>`).join("")}</div>
+    <p class="muted small">Redondeado a 1 kg. Si a ese peso te sobran 2 o más repeticiones, tu RM real es más alto: súbelo un 5 % y apunta la marca para que la app lo use.</p>
+    ${e.list.length>1?`<details><summary class="small">De dónde sale (${e.list.length} referencias)</summary><div class="list">${e.list.map(x=>`<div class="item"><span class="num" style="width:44px">${x.rm}</span><div class="s">${esc(x.src)}</div><span></span></div>`).join("")}</div></details>`:""}
+  </div>`;
+}
+
 function countdownStrip(){
   const ev = futuros(); if(!ev.length) return "";
   return `<div class="cd-row">${ev.map(e=>{ const d = daysBetween(new Date(), parseISO(e.fecha));
@@ -867,6 +912,7 @@ function vBox(){
     ${f && f.kg ? `<div class="banner info"><b>${esc(f.ejercicio)} ${f.series}×${f.reps}${f.pct?` al ${f.pct} %`:""} con ${f.kg} kg</b> → 1RM estimado ≈ <b>${Math.round(f.rm)} kg</b> <span class="muted">(cálculo propio${f.pct?": carga ÷ porcentaje":", fórmula de Epley"})</span>. <button class="ghost" data-act="sug-marca">Guardar en marcas</button></div>`:""}
     ${fmWod()}${syncHint()}
   </div>
+  ${calcCard()}
   ${photoCard(box)}
   ${wods.length? `<div class="card"><h3>Tus WODs</h3><div class="list">${wods.slice(0,40).map(w=>{ const st = box.find(s=>iso(s.date)===w.fecha);
     return `<div class="item" style="align-items:start"><span class="badge" style="background:var(--box)">${esc((w.rx||"").slice(0,2).toUpperCase())}</span><div style="min-width:0"><div class="t">${esc(w.nombre)} <span class="muted" style="font-weight:400">· ${esc(w.formato)}</span></div><div class="s">${fDate(parseISO(w.fecha))}${w.rpe?" · RPE "+esc(w.rpe):""}${st?" · "+fMin(st.min)+" en Strava":""}</div>${w.resultado?`<div class="res">${esc(w.resultado)}</div>`:""}${w.notas?`<div class="com">${esc(w.notas)}</div>`:""}${w.texto?`<details><summary class="small muted">Ver entreno${w.accesorios?(w.accHecho?" · accesorios hechos":" · accesorios no hechos"):""}</summary><div class="pre small">${esc(w.texto)}</div>${w.accesorios?`<div class="pre small muted" style="margin-top:6px">${w.accHecho?"✓ ":"✗ "}${esc(w.accesorios)}</div>`:""}</details>`:""}</div>${delBtn(w.id)}</div>`; }).join("")}</div></div>`:""}
@@ -1110,6 +1156,7 @@ document.addEventListener("click", async e=>{
 document.addEventListener("change", async e=>{
   if(e.target.id==="ocrFile" && e.target.files[0]){ ocrRead(e.target.files[0], false); return; }
   if(e.target.id==="bulkFiles" && e.target.files.length){ bulkImport(e.target.files); return; }
+  if(e.target.id==="calc_ex"){ S.calcEx = e.target.value; render(); return; }
   if(e.target.id!=="importFile" || !e.target.files[0]) return;
   try{ const j = JSON.parse(await e.target.files[0].text()); const rs = (j.registros||[]).filter(r=>r && r.id && r.tipo);
     S.recs = merge(S.recs, rs); LS.set("recs", S.recs); schedulePush(); toast(`${rs.length} registros importados`); render(); }
