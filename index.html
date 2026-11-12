@@ -263,6 +263,42 @@ button.big{padding:13px;font-size:16px}
 .hyx-st{display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
 .hyx-st:first-child{border-top:0}
 .hyx-n{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--box);color:#fff;font-family:var(--display);font-weight:800}
+/* ---------- carreras ---------- */
+.runlist{display:flex;flex-direction:column;gap:8px}
+.runc{display:grid;grid-template-columns:56px minmax(0,1fr) auto;gap:12px;align-items:center;text-align:left;background:var(--surface-2);border:1px solid transparent;border-radius:14px;padding:10px 12px;color:var(--fg);font-weight:400}
+.runc:hover{border-color:var(--line)}
+.rmap{width:56px;height:56px;background:var(--surface);border-radius:12px;display:block}
+.rthumb{width:56px;height:56px;display:block}
+.rbody{display:flex;flex-direction:column;gap:2px;min-width:0}
+.rname{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rstats{font-size:13px;color:var(--muted)} .rstats b{color:var(--fg);font-family:var(--display);font-size:16px}
+.routesmap{height:280px;border-radius:14px;overflow:hidden;background:var(--surface-2);z-index:0}
+.runmap{height:260px;border-radius:14px;overflow:hidden;background:var(--surface-2);z-index:0}
+.leaflet-container{font-family:var(--body)}
+.pscale{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted)}
+.pscale i{flex:1;height:7px;border-radius:999px;background:linear-gradient(90deg,#5B7BFF,#4FB3D9,#F2C14E,#F08A4B,#E0436F)}
+.rstatgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px}
+.rstatgrid div{background:var(--surface-2);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column}
+.rstatgrid b{font-family:var(--display);font-size:22px;line-height:1.1}
+.rstatgrid span{font-size:11.5px;color:var(--muted)}
+.mchips.run i{color:var(--run);background:color-mix(in srgb,var(--run) 12%,transparent);font-size:12px;padding:3px 9px}
+.mchips.run i.pr{color:#fff;background:var(--box)}
+.splits{display:flex;flex-direction:column;gap:4px}
+.split{display:grid;grid-template-columns:22px minmax(0,1fr) 44px 46px;gap:8px;align-items:center;font-size:13px}
+.split .k{color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+.split .bar{height:14px;background:var(--surface-2);border-radius:5px;overflow:hidden}
+.split .bar i{display:block;height:100%;background:var(--run);opacity:.75;border-radius:5px}
+.split.best .bar i{background:var(--box);opacity:1}
+.split .pv{font-family:var(--display);font-weight:700;font-size:15px;font-variant-numeric:tabular-nums}
+.split .el{font-size:11px;color:var(--muted);text-align:right}
+.split .el.up{color:var(--warn)}
+/* ---------- box extra ---------- */
+.cal{display:block;width:100%;height:auto}
+.cal text{fill:var(--muted);font-size:9px;font-family:var(--body)}
+.bal .balbar{height:12px;border-radius:999px;background:color-mix(in srgb,var(--run) 55%,transparent);overflow:hidden;margin-top:4px}
+.bal .balbar i{display:block;height:100%;background:var(--box);border-radius:999px 0 0 999px}
+.radar{max-width:320px;margin:0 auto}
+.radar text{font-size:11px}
 </style>
 </head>
 <body>
