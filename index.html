@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Cuaderno de Entreno</title>
 <meta name="description" content="Tus entrenos de Strava, WODs, marcas y salud en una app.">
-<meta name="theme-color" content="#F3F4F1" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0F1412" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#F5F6FA" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0D0F15" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -353,6 +353,73 @@ nav.tabs a[aria-current="page"]::before{content:"";position:absolute;top:6px;wid
 nav.tabs a[aria-current="page"] svg{stroke:var(--box)}
 nav.tabs a[aria-current="page"]{color:var(--fg)}
 nav.tabs .in{isolation:isolate}
+
+/* =========== LOOK & FEEL v2: luminoso, limpio, con sombras suaves =========== */
+:root{
+  --bg:#F5F6FA; --surface:#FFFFFF; --surface-2:#F0F2F7; --fg:#151826; --muted:#6B7184; --line:#E4E7EF;
+  --run:#3366FF; --box:#FF4D7D; --foot:#14B87A; --other:#8A90A2; --ok:#14A86F; --warn:#F08C1A; --bad:#E5484D;
+  --m0:#DFE3EC; --m1:#FFD3DF; --m2:#FF9DB8; --m3:#FF6A93; --m4:#E3285E; --bodybase:#E8EBF2;
+  --hero:linear-gradient(135deg,#FF8A4C 0%,#FF4D7D 55%,#E0368F 100%); --hero-fg:#FFFFFF;
+  --shadow:0 1px 2px rgba(21,24,38,.04),0 8px 24px rgba(21,24,38,.06);
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0D0F15; --surface:#171A23; --surface-2:#20242F; --fg:#EEF0F6; --muted:#9097AB; --line:#2A2F3C;
+  --run:#7C9BFF; --box:#FF7FA4; --foot:#3FD69B; --other:#8E95A8; --ok:#3FD69B; --warn:#FFB259; --bad:#FF6B70;
+  --m0:#2A2F3C; --m1:#4A2534; --m2:#7D2D4C; --m3:#C23D6D; --m4:#FF7FA4; --bodybase:#232733;
+  --hero:linear-gradient(135deg,#E2703B 0%,#E03C6C 55%,#B92C78 100%); --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0D0F15; --surface:#171A23; --surface-2:#20242F; --fg:#EEF0F6; --muted:#9097AB; --line:#2A2F3C;
+  --run:#7C9BFF; --box:#FF7FA4; --foot:#3FD69B; --other:#8E95A8; --ok:#3FD69B; --warn:#FFB259; --bad:#FF6B70;
+  --m0:#2A2F3C; --m1:#4A2534; --m2:#7D2D4C; --m3:#C23D6D; --m4:#FF7FA4; --bodybase:#232733;
+  --hero:linear-gradient(135deg,#E2703B 0%,#E03C6C 55%,#B92C78 100%); --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25); color-scheme:dark}
+body{background:var(--bg)}
+.wrap{padding-block:18px calc(var(--nav-h) + 32px + env(safe-area-inset-bottom,0px))}
+.stack{gap:16px}
+.card,.today,.statrow div{border:0;box-shadow:var(--shadow);border-radius:20px}
+.card{padding:18px}
+h2{font-size:22px;letter-spacing:.02em}
+.tile,.wodc,.runc,.mtile,.act,.hxst,.kmc,.rstatgrid div,.twin,.wtext,.hxsum{border-radius:14px}
+nav.tabs{background:color-mix(in srgb,var(--surface) 88%,transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--line)}
+.gear{border:0;background:var(--surface);box-shadow:var(--shadow)}
+/* héroe con degradado */
+.hero{background:var(--hero);color:var(--hero-fg);box-shadow:0 14px 34px -14px rgba(255,77,125,.55)}
+.hero .eyebrow{color:var(--hero-fg);opacity:.85}
+.glass{background:rgba(255,255,255,.2);border-color:rgba(255,255,255,.35)}
+.hero-stats{border-top-color:rgba(255,255,255,.3)}
+/* notas ocultas tras ⓘ */
+#app .note{display:none;font-size:13px;color:var(--muted);background:var(--surface-2);border-radius:12px;padding:10px 12px;margin:0}
+#app .notes-on .note{display:block}
+#sheet .note{font-size:13px;color:var(--muted)}
+.nfo{width:20px;height:20px;padding:0;margin-left:8px;border-radius:50%;font:700 12px/18px var(--body);font-style:italic;vertical-align:middle;background:var(--surface-2);color:var(--muted);border:1px solid var(--line);text-transform:none}
+.notes-on .nfo{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+/* Hoy */
+.today{padding:18px 18px 14px}
+.today .tt{font-size:34px}
+.whyd summary{cursor:pointer;font-size:12.5px;color:var(--muted);font-weight:600}
+.addbtn.foot{background:var(--foot);align-self:flex-start}
+.form{display:flex;flex-direction:column;gap:8px;background:var(--surface-2);border-radius:14px;padding:10px 12px}
+.formring{display:flex;align-items:center;gap:12px}
+.ring{width:56px;height:56px;flex:none}
+.tips{margin:0;padding-left:18px;font-size:13.5px;display:flex;flex-direction:column;gap:4px}
+.quick{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.quick button{display:flex;flex-direction:column;align-items:center;gap:6px;background:var(--surface);border:0;box-shadow:var(--shadow);border-radius:16px;padding:12px 6px;font-size:13px;font-weight:600;color:var(--fg)}
+.quick svg{width:24px;height:24px;fill:none;stroke:var(--box);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.quick button:first-child svg{stroke:var(--foot)}
+.quick button:last-child svg{stroke:var(--run)}
+/* fútbol */
+.big3{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.segopt{position:relative;display:block;color:var(--fg);font-size:14px}
+.segopt input{position:absolute;opacity:0;pointer-events:none}
+.segopt span{display:block;text-align:center;padding:10px;border-radius:10px;background:var(--surface-2);font-weight:600}
+.segopt input:checked+span{background:var(--foot);color:#fff}
+.segopt input:focus-visible+span{outline:2px solid var(--run)}
+.rng{accent-color:var(--foot);padding:0;border:0;background:none}
+.daypick{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px}
+.daypick button{display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 2px;border-radius:12px;background:var(--surface-2);border:0;font-weight:600}
+.daypick button small{font-size:10px;font-weight:500;color:var(--muted)}
+.daypick button.entreno{background:color-mix(in srgb,var(--foot) 18%,transparent);color:var(--foot)}
+.daypick button.partido{background:var(--foot);color:#fff}
+.daypick button.partido small{color:#fff}
 </style>
 </head>
 <body>

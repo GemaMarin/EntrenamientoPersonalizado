@@ -300,7 +300,10 @@ function allSessions(){
     const c = catOf(a.sport||"");
     return { ...a, cat:c, date:localDate(a.start), kcal:S.det[a.id]?.cal||0,
       rpe: a.race || (c==="run" && a.km>=18) ? 8 : RPE_DEF[c], rpeEst:true };
-  }).filter(s=>s.cat!=="walk").sort((a,b)=>b.date-a.date);   // senderismo y caminatas fuera
+  }).filter(s=>s.cat!=="walk").concat(logs().filter(l=>l.tipo==="futbol").map(l=>({
+    src:"log", id:l.id, cat:"futbol", name:{partido:"Partido de fútbol", entreno:"Entreno de fútbol", pachanga:"Pachanga"}[l.formato]||"Fútbol",
+    date:parseISO(l.fecha), start:l.fecha+"T12:00:00", min:+l.minutos||0, km:0, kcal:0, rpe:+l.rpe||RPE_DEF.futbol, rpeEst:!l.rpe, notas:l.notas, goles:l.goles, formato:l.formato }))
+  ).sort((a,b)=>b.date-a.date);   // senderismo y caminatas fuera; fútbol desde tus registros
 }
 const load = s => s.min * s.rpe;
 function weekBuckets(sessions, nWeeks){
@@ -410,7 +413,7 @@ function stackedWeeks(weeks){
 }
 function paceChart(runs){
   const pts = runs.filter(r=>r.pace && r.km>=3 && r.pace<480 && daysBetween(r.date,new Date())<400).sort((a,b)=>a.date-b.date);
-  if(pts.length<2) return `<p class="muted small">Aún no hay suficientes carreras para la tendencia.</p>`;
+  if(pts.length<2) return `<p class="note">Aún no hay suficientes carreras para la tendencia.</p>`;
   const W=400,H=210,pl=40,pr=12,pt=14,pb=26;
   const t0=pts[0].date.getTime(), t1=pts[pts.length-1].date.getTime();
   let lo=Math.min(...pts.map(p=>p.pace)), hi=Math.max(...pts.map(p=>p.pace));
@@ -425,7 +428,7 @@ function paceChart(runs){
   pts.forEach((p,i)=>{ const r = 3+5*(p.km/rmax); const last=i===pts.length-1; g+=`<circle cx="${x(p.date.getTime())}" cy="${y(p.pace)}" r="${r}" fill="var(--run)" fill-opacity="${last?1:.75}" stroke="var(--surface)" stroke-width="1.5"><title>${fDate(p.date)} · ${p.km.toFixed(1)} km · ${fPace(p.pace)}/km</title></circle>`; });
   const lp = pts[pts.length-1];
   g+=`<text x="${Math.min(W-pr-4,x(lp.date.getTime()))}" y="${y(lp.pace)-12}" text-anchor="end" style="fill:var(--fg);font-weight:600">${fPace(lp.pace)}/km</text>`;
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Ritmo medio por carrera">${g}</svg><p class="muted small">Arriba = más rápido. El tamaño del punto es la distancia.</p>`;
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Ritmo medio por carrera">${g}</svg><p class="note">Arriba = más rápido. El tamaño del punto es la distancia.</p>`;
 }
 function monthlyKm(runs){
   const now=new Date(), months=[];
@@ -453,6 +456,7 @@ function sessionItem(s){
            : s.cat==="walk" ? `${s.km.toFixed(1)} km · ${Math.round(s.elev)} m+ · ${fMin(s.min)}`
            : `${fMin(s.min)}${s.kcal? " · "+s.kcal+" kcal":""}`;
   const hr = s.hr ? ` · ${Math.round(s.hr)} ppm` : "";
+  if(s.src==="log") return `<div class="item"><span class="badge" style="background:${COL[s.cat]}">${tag}</span><div style="min-width:0"><div class="t">${esc(s.name)}</div><div class="s">${DIAS[dow(s.date)]} ${fDate(s.date)} · ${fMin(s.min)} · esfuerzo ${s.rpe}/10${s.goles&&+s.goles?` · ${s.goles} gol${+s.goles>1?"es":""}`:""}</div></div>${delBtn(s.id)}</div>`;
   return `<a class="item" ${s.cat==="run"?`data-run="${s.id}" href="#correr"`:`href="https://www.strava.com/activities/${s.id}" target="_blank" rel="noopener"`} style="text-decoration:none;color:inherit"><span class="badge" style="background:${COL[s.cat]}">${tag}</span><div style="min-width:0"><div class="t">${esc(s.name)}</div><div class="s">${DIAS[dow(s.date)]} ${fDate(s.date)} · ${det}${hr}</div></div>${s.prs?`<span class="pill">${s.prs} PR</span>`:"<span></span>"}</a>`;
 }
 function weekStrip(sessions){
@@ -472,6 +476,69 @@ function field(id,label,html){ return `<label for="${id}">${label}${html}</label
 /* =========================================================
    VISTAS
    ========================================================= */
+/* =========================================================
+   FÚTBOL: días fijos y registro
+   ========================================================= */
+// Días habituales (0 = lunes … 6 = domingo). Por defecto: entreno lunes y miércoles, partido domingo.
+function footPrefs(){
+  const r = logs().find(l=>l.tipo==="pref" && l.id==="pref-futbol");
+  const parse = s => String(s??"").split(",").filter(x=>x!=="").map(Number);
+  return r ? {entreno: parse(r.entreno), partido: parse(r.partido)} : {entreno:[0,2], partido:[6]};
+}
+function footRole(di){ const p = footPrefs(); return p.partido.includes(di) ? "partido" : p.entreno.includes(di) ? "entreno" : null; }
+const FUT = {cuadriceps:.8, isquios:.8, gemelos:.8, gluteos:.6, aductores:.7, abdomen:.3, oblicuos:.2};
+function fmFutbol(p={}){ return `<form data-form="futbol">
+  <div class="seg big3" role="group" aria-label="Tipo">${[["partido","Partido"],["entreno","Entreno"],["pachanga","Pachanga"]].map(([v,l])=>`<label class="segopt"><input type="radio" name="formato" value="${v}" ${ (p.formato||"partido")===v ? "checked":""}><span>${l}</span></label>`).join("")}</div>
+  <div class="grid2">${field("f_fecha","Fecha",`<input id="f_fecha" name="fecha" type="date" value="${val(p.fecha||today())}" required>`)}
+  ${field("f_min","Minutos jugados",`<input id="f_min" name="minutos" type="number" min="1" max="200" value="${val(p.minutos|| (p.formato==="entreno"?75:60))}" required>`)}</div>
+  <label for="f_rpe">Esfuerzo <span class="muted" id="f_rpe_v">${p.rpe||7}/10</span><input id="f_rpe" name="rpe" type="range" min="1" max="10" value="${p.rpe||7}" class="rng"></label>
+  <div class="grid2">${field("f_gol","Goles",`<input id="f_gol" name="goles" type="number" min="0" max="20" placeholder="0">`)}
+  ${field("f_asi","Asistencias",`<input id="f_asi" name="asistencias" type="number" min="0" max="20" placeholder="0">`)}</div>
+  ${field("f_notas","Notas",`<input id="f_notas" name="notas" placeholder="Resultado, molestias, sensaciones…">`)}
+  <button class="primary big" type="submit">Guardar</button></form>`; }
+function footPrefsCard(){
+  const p = footPrefs();
+  return `<div class="card"><div class="row between"><h2>Tu fútbol</h2></div>
+    <p class="small">Toca cada día para cambiarlo entre <b>nada</b>, <b>entreno</b> y <b>partido</b>. El entrenador de «Hoy» lo usa para organizar el resto de la semana.</p>
+    <div class="daypick">${DIAS.map((d,i)=>{ const r = p.partido.includes(i) ? "partido" : p.entreno.includes(i) ? "entreno" : ""; return `<button type="button" data-footday="${i}" class="${r}"><b>${d}</b><small>${r||"—"}</small></button>`; }).join("")}</div></div>`;
+}
+function cycleFootDay(i){
+  const p = footPrefs(), role = p.partido.includes(i) ? "partido" : p.entreno.includes(i) ? "entreno" : "";
+  p.entreno = p.entreno.filter(x=>x!==i); p.partido = p.partido.filter(x=>x!==i);
+  if(role==="") p.entreno.push(i); else if(role==="entreno") p.partido.push(i);
+  upsertRec("pref-futbol", {tipo:"pref", fecha:today(), entreno:p.entreno.sort().join(","), partido:p.partido.sort().join(",")});
+}
+
+/* =========================================================
+   FORMA DE HOY: puntuación y consejos a partir del chequeo
+   ========================================================= */
+function readiness(ck){
+  if(!ck) return null;
+  if(ck.sintoma==="si") return 0;
+  const v = {mal:0, normal:.6, bien:1, baja:0, alta:1, cargadas:0, normales:.6, frescas:1};
+  const parts = [["sueno",35],["energia",35],["piernas",30]].filter(([k])=>ck[k]);
+  if(!parts.length) return null;
+  const max = parts.reduce((t,[,w])=>t+w,0);
+  return Math.round(100 * parts.reduce((t,[k,w])=>t+w*(v[ck[k]]??.6),0) / max);
+}
+function readinessTips(ck){
+  if(!ck) return [];
+  const t = [];
+  if(ck.sintoma==="si") return ["Hoy nada de intensidad: descanso o paseo suave.", "Bebe agua con algo de sal y come con normalidad.", "Si se repite o te mareas entrenando, consúltalo con tu médico antes de volver a cargar."];
+  if(ck.sueno==="mal") t.push("Has dormido mal: baja un punto la intensidad y evita series o RM. Intenta acostarte 30 min antes esta noche.");
+  if(ck.energia==="baja") t.push("Poca energía: come algo con hidratos 1–2 h antes de entrenar y llega bien hidratada.");
+  if(ck.piernas==="cargadas") t.push("Piernas cargadas: rodaje muy suave o bici. 10 min de movilidad de cadera, gemelos e isquios. En el box, escala las cargas de pierna.");
+  if(ck.sueno==="bien" && ck.energia==="alta" && ck.piernas==="frescas") t.push("Estás fresca: buen día para la sesión de calidad o para apretar en el WOD.");
+  // Tendencia: 3 de los últimos 4 días con forma baja → descarga
+  const last = logs().filter(l=>l.tipo==="checkin").sort((a,b)=>b.fecha.localeCompare(a.fecha)).slice(0,4).map(readiness).filter(x=>x!=null);
+  if(last.length>=3 && last.filter(x=>x<45).length>=3) t.push("Llevas varios días con la forma baja: plantéate una semana de descarga (mismo número de sesiones, la mitad de intensidad).");
+  return t;
+}
+function ring(score){
+  const r = 26, c = 2*Math.PI*r, col = score>=70 ? "var(--ok)" : score>=45 ? "var(--warn)" : "var(--bad)";
+  return `<svg class="ring" viewBox="0 0 64 64" role="img" aria-label="Forma ${score} de 100"><circle cx="32" cy="32" r="${r}" fill="none" stroke="var(--line)" stroke-width="7"/><circle cx="32" cy="32" r="${r}" fill="none" stroke="${col}" stroke-width="7" stroke-linecap="round" stroke-dasharray="${c*score/100} ${c}" transform="rotate(-90 32 32)"/><text x="32" y="37" text-anchor="middle" style="font:800 17px var(--display);fill:var(--fg)">${score}</text></svg>`;
+}
+
 /* =========================================================
    HOY: entrenador diario + chequeo rápido
    ========================================================= */
@@ -500,7 +567,8 @@ function coachToday(){
   const longDone = runs.some(r=>r.km >= longKm*0.9), qualDone = runs.some(r=>r.pace && r.pace < P.p5+50 && r.km < 14);
   const runsLeft = Math.max(0, info.runs - runs.length), boxLeft = Math.max(0, info.box - nBox), daysLeft = 7 - di;
   const yest = ss.filter(s=>daysBetween(s.date, now)===1);
-  const hardY = yest.some(s=>s.cat==="box" || (s.cat==="run" && (s.km>=14 || (s.pace && s.pace < P.p5+50))));
+  const hardY = yest.some(s=>s.cat==="box" || s.cat==="futbol" || (s.cat==="run" && (s.km>=14 || (s.pace && s.pace < P.p5+50))));
+  const role = footRole(di), tomorrow = footRole((di+1)%7);
   const lastRun = ss.find(s=>s.cat==="run"), sinceRun = lastRun ? daysBetween(lastRun.date, now) : 99;
   const n28 = ss.filter(s=>daysBetween(s.date, now) < 28).length;
   const A = n28 >= 6 ? acwr(ss).ratio : null, ck = checkinToday();   // con poco historial el cociente no es fiable
@@ -508,11 +576,20 @@ function coachToday(){
   const why = [];
   if(cp) why.push(`Fase <b>${info.n}</b> (${Math.max(1,Math.round((daysBetween(cp.start,cp.end)+1)/7))} sem) camino de ${esc(cp.ev.nombre)}`);
   why.push(`Esta semana: ${nBox}/${info.box} box · ${runs.length}/${info.runs} carreras`);
+  if(done.length && done.every(s=>s.cat==="futbol")) return {k:"done", c:"var(--ok)", t:"Fútbol hecho", d:`${done.map(s=>esc(s.name)).join(" + ")} · ${fMin(done.reduce((a,s)=>a+s.min,0))}. Estira gemelos e isquios, hidrátate y cena con hidratos y proteína.${tomorrow==="partido"?"":" Mañana, si te toca correr, que sea suave."}`, why};
   if(done.length) return {k:"done", c:"var(--ok)", t:"Entreno de hoy hecho", d:`${done.map(s=>esc(s.name)).join(" + ")} · ${fMin(done.reduce((a,s)=>a+s.min,0))}. Hidrátate, come algo con proteína e hidratos y estira 5 minutos.`, why};
   if(ck && ck.sintoma==="si") return {k:"rest", c:"var(--bad)", t:"Hoy, descanso", d:"Has marcado mareo o molestia. Descansa, hidrátate y, si se repite, coméntaselo a tu médico antes de volver a la intensidad.", why:["Chequeo de hoy: mareo o molestia"]};
   const tired = ck && (ck.energia==="baja" || (ck.sueno==="mal" && ck.piernas==="cargadas"));
   if(tired || (A && A>1.5)){ why.unshift(tired ? "Chequeo de hoy: poca energía o mala noche con piernas cargadas" : `Carga alta: ${A.toFixed(2)} (más de 1,5)`);
     return {k:"easy", c:"var(--warn)", t:"Recuperación activa", d:`20–30 min de caminar, bici suave o movilidad. Si te encuentras bien, como mucho 25 min muy suaves a ${fPace(P.p5+110)}/km o más lento.`, why}; }
+  if(role && !done.some(s=>s.cat==="futbol")){
+    why.unshift(role==="partido" ? "Hoy es tu día de partido" : "Hoy tienes entreno de fútbol");
+    return {k:"foot", c:"var(--foot)", role, t: role==="partido" ? "Partido de fútbol" : "Entreno de fútbol",
+      d: role==="partido" ? "Calienta 10 min con trote, movilidad y unos sprints cortos. Al terminar, apúntalo con los minutos jugados." : "Entreno con el equipo. Si quieres sumar, 10 min de core al acabar. Apúntalo al terminar.", why}; }
+  if(tomorrow==="partido"){ why.unshift("Mañana tienes partido");
+    return boxDays().includes(di) && boxLeft>0
+      ? {k:"box", c:"var(--box)", t:"Box suave", d:"Mañana juegas: ve al box pero sin apretar en pierna (escala cargas y evita saltos en exceso).", why}
+      : {k:"easy", c:"var(--warn)", t:"Suave o descanso", d:`Mañana juegas. Como mucho 30 min muy suaves a ${P.z2}/km o descanso con movilidad.`, why}; }
   if(boxDays().includes(di) && boxLeft>0){
     const hx = cp && ["construccion","especifico"].includes(cp.key);
     why.unshift(`Sueles ir al box los ${boxDays().map(i=>DIAS[i]).join(" y ")}`);
@@ -537,14 +614,21 @@ function coachToday(){
   why.unshift("Has cumplido lo de la semana");
   return {k:"rest", c:"var(--muted)", t:"Descanso", d:"Descanso completo o un paseo. El descanso también entrena.", why};
 }
+const QI = {
+  foot:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7l4 3-1.5 4.5h-5L8 10z"/></svg>',
+  wod:'<svg viewBox="0 0 24 24"><path d="M2 12h20M5 8v8M19 8v8M8 6v12M16 6v12"/></svg>',
+  share:'<svg viewBox="0 0 24 24"><path d="M12 3v12M7 8l5-5 5 5M5 14v6h14v-6"/></svg>'
+};
 function todayCard(){
   const c = coachToday(), ck = checkinToday();
   const opt = (f, vals) => `<div class="ckrow"><span>${f[1]}</span><div class="ckseg">${vals.map(([v,l])=>`<button type="button" data-ck="${f[0]}" data-v="${v}" aria-pressed="${ck && ck[f[0]]===v}">${l}</button>`).join("")}</div></div>`;
   return `<div class="today" style="--c:${c.c}">
-    <div class="row between"><span class="eyebrow">Hoy · ${DIAS[dow(new Date())]} ${fDate(new Date())}</span><span class="tk">${{run:"Correr",box:"Box",rest:"Descanso",easy:"Suave",done:"Hecho"}[c.k]}</span></div>
+    <div class="row between"><span class="eyebrow">Hoy · ${DIAS[dow(new Date())]} ${fDate(new Date())}</span><span class="tk">${{run:"Correr",box:"Box",rest:"Descanso",easy:"Suave",done:"Hecho",foot:"Fútbol"}[c.k]}</span></div>
     <h2 class="tt">${c.t}</h2>
     <p class="td">${c.d}</p>
-    ${c.why.length?`<ul class="why">${c.why.map(w=>`<li>${w}</li>`).join("")}</ul>`:""}
+    ${c.k==="foot"?`<button class="addbtn foot" data-sheet="futbol" data-fmt="${c.role}">Apuntar ${c.role==="partido"?"partido":"entreno"}</button>`:""}
+    ${(()=>{ const sc = readiness(ck), tips = readinessTips(ck); if(sc==null) return ""; return `<div class="form"><div class="formring">${ring(sc)}<span class="small"><b>Tu forma hoy</b><br><span class="muted">según tu chequeo</span></span></div>${tips.length?`<ul class="tips">${tips.map(t=>`<li>${t}</li>`).join("")}</ul>`:""}</div>`; })()}
+    ${c.why.length?`<details class="whyd"><summary>Por qué</summary><ul class="why">${c.why.map(w=>`<li>${w}</li>`).join("")}</ul></details>`:""}
     <details class="ck" ${!ck || ["sueno","energia","piernas","sintoma"].some(k=>!ck[k]) ? "open" : ""}><summary>${ck ? `Chequeo hecho · sueño ${ck.sueno||"–"}, energía ${ck.energia||"–"}, piernas ${ck.piernas||"–"}${ck.sintoma==="si"?" · mareo/molestia":""}` : "¿Cómo estás hoy? (10 segundos)"}</summary>
       ${opt(["sueno","Sueño"], [["mal","Mal"],["normal","Normal"],["bien","Bien"]])}
       ${opt(["energia","Energía"], [["baja","Baja"],["normal","Normal"],["alta","Alta"]])}
@@ -598,7 +682,7 @@ function hyroxSheet(){
       <div class="row between"><span><b>${i+1}. ${st.n}</b> <small class="muted">${st.d}</small></span><div class="stepper sm"><button type="button" data-hx="min" data-i="${i}" data-d="-0.1">−</button><b id="hx_min_${i}">${h.st[i].min.toFixed(1)}′</b><button type="button" data-hx="min" data-i="${i}" data-d="0.1">+</button></div></div>
       <div class="row" style="gap:10px;flex-wrap:nowrap"><small class="muted" style="width:62px">Tú <b id="hx_pl_${i}">${h.st[i].pct}%</b></small><input type="range" min="0" max="100" step="10" value="${h.st[i].pct}" data-hxpct="${i}" aria-label="Tu parte en ${st.n}"><small class="muted" style="width:62px;text-align:right">Ella <b id="hx_pr_${i}">${100-h.st[i].pct}%</b></small></div>
     </div>`).join("")}</div>
-    <p class="muted small">Tiempos de partida: estimación propia para un nivel intermedio en Doubles. El ritmo sale de tu media + 30 s/km (correr cansada entre estaciones). Ajústalos con tus simulaciones y tu compañera.</p>
+    <p class="note">Tiempos de partida: estimación propia para un nivel intermedio en Doubles. El ritmo sale de tu media + 30 s/km (correr cansada entre estaciones). Ajústalos con tus simulaciones y tu compañera.</p>
     <button class="primary big" type="button" data-act="hxsave">Guardar plan</button>
   </div>`];
 }
@@ -632,7 +716,7 @@ function hmSheet(){
       ${pr?`<p class="small">Tu marca: <b>${fTime(pr)}</b> (${fPace(pr/21.0975)}/km). Objetivo ${goal<pr?`${fTime(pr-goal)} más rápido`:`${fTime(goal-pr)} más lento`}.</p>`:""}</div>
     <div class="kmgrid">${sp.map(s=>`<div class="kmc${s.k===8||s.k===15?" gel":""}"><span class="k">${s.k===22?"21,1":s.k}</span><b>${fPace(s.p)}</b><small>${fTime(s.acc)}</small></div>`).join("")}</div>
     <p class="small"><span class="gelmark"></span> Gel con agua en los km 8 y 15 (unos 40 y 75 minutos). Pruébalo antes en las tiradas largas.</p>
-    <p class="muted small">${strat==="neg"?"Parcial negativo: primeros 10 km 6 s/km más lentos que el objetivo, del 10 al 18 a ritmo objetivo y el final más rápido. Suele ser la estrategia más eficaz para la media.":"Ritmo constante todo el recorrido."} Cálculo propio; ajusta por el perfil del recorrido.</p>
+    <p class="note">${strat==="neg"?"Parcial negativo: primeros 10 km 6 s/km más lentos que el objetivo, del 10 al 18 a ritmo objetivo y el final más rápido. Suele ser la estrategia más eficaz para la media.":"Ritmo constante todo el recorrido."} Cálculo propio; ajusta por el perfil del recorrido.</p>
     ${ev?`<button class="primary big" type="button" data-act="hmsave">Guardar objetivo en la competición</button>`:""}
   </div>`];
 }
@@ -653,14 +737,14 @@ async function weekStory(){
   x.fillStyle = "rgba(255,255,255,.7)"; x.font = `600 38px ${B}`; x.fillText(`SEMANA DEL ${m.getDate()} DE ${MESES[m.getMonth()].toUpperCase()}`, 90, 200);
   x.fillStyle = "#fff"; x.font = `800 230px ${D}`; x.fillText(fMin(mins).replace(" min","′"), 80, 440);
   x.font = `500 44px ${B}`; x.fillStyle = "rgba(255,255,255,.8)"; x.fillText(`de entreno · ${ss.length} ${ss.length===1?"sesión":"sesiones"}`, 90, 515);
-  const stats = [[km.toFixed(1)+" km","corriendo"],[String(ss.filter(s=>s.cat==="box").length),"sesiones de box"],[String(streak(allSessions()).n),"semanas de racha"]];
+  const stats = [[km.toFixed(1)+" km","corriendo"],[String(ss.filter(s=>s.cat==="box").length),"sesiones de box"],[String(ss.filter(s=>s.cat==="futbol").length),"de fútbol"]];
   stats.forEach(([v,l],i)=>{ const X = 90 + i*320; x.fillStyle = "#fff"; x.font = `800 96px ${D}`; x.fillText(v, X, 700); x.fillStyle = "rgba(255,255,255,.7)"; x.font = `500 34px ${B}`; x.fillText(l, X, 750); });
   // barras por día
-  const byD = [0,0,0,0,0,0,0].map(()=>({run:0, box:0})); ss.forEach(s=>{ const k = s.cat==="run"?"run":"box"; byD[dow(s.date)][k] += s.min; });
-  const mx = Math.max(60, ...byD.map(d=>d.run+d.box)), bw = 96, base = 1180;
+  const byD = [0,0,0,0,0,0,0].map(()=>({run:0, box:0, foot:0})); ss.forEach(s=>{ const k = s.cat==="run"?"run":s.cat==="futbol"?"foot":"box"; byD[dow(s.date)][k] += s.min; });
+  const mx = Math.max(60, ...byD.map(d=>d.run+d.box+d.foot)), bw = 96, base = 1180;
   byD.forEach((d,i)=>{ const X = 90 + i*(bw+40); let y = base;
     x.fillStyle = "rgba(255,255,255,.1)"; x.fillRect(X, base-300, bw, 300);
-    [["run","#7C9BFF"],["box","#FF7FA4"]].forEach(([k,c])=>{ const h = d[k]/mx*300; if(h){ x.fillStyle = c; x.fillRect(X, y-h, bw, h); y -= h; } });
+    [["run","#7C9BFF"],["box","#FF7FA4"],["foot","#4FD08F"]].forEach(([k,c])=>{ const h = d[k]/mx*300; if(h){ x.fillStyle = c; x.fillRect(X, y-h, bw, h); y -= h; } });
     x.fillStyle = "rgba(255,255,255,.75)"; x.font = `600 34px ${B}`; x.textAlign = "center"; x.fillText(DIAS[i].toUpperCase(), X+bw/2, base+50); x.textAlign = "left"; });
   // WODs
   let y = 1340; x.fillStyle = "rgba(255,255,255,.7)"; x.font = `600 36px ${B}`; x.fillText(wods.length ? "WODS" : "", 90, y);
@@ -680,6 +764,16 @@ async function weekStory(){
 /* =========================================================
    FLUIDEZ: números que se animan y gestos entre pestañas
    ========================================================= */
+// Las explicaciones largas se esconden: un botón ⓘ junto al título de la tarjeta las muestra
+function decorateNotes(root){
+  root.querySelectorAll(".card, .today").forEach(card=>{
+    if(!card.querySelector(".note") || card.querySelector(":scope .nfo")) return;
+    const h = card.querySelector("h2, h3"); if(!h) return;
+    const b = document.createElement("button"); b.type = "button"; b.className = "nfo"; b.dataset.act = "notes"; b.setAttribute("aria-label", "Más información"); b.textContent = "i";
+    h.appendChild(b);
+    if(S.notesOpen && S.notesOpen.has(h.textContent.replace(/i$/,""))) card.classList.add("notes-on");
+  });
+}
 function countUp(root){
   if(matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   root.querySelectorAll("[data-count]").forEach(el=>{ const end = +el.dataset.count; if(!isFinite(end) || end<=0) return;
@@ -695,15 +789,18 @@ function vResumen(){
   const runs = ss.filter(s=>s.cat==="run"), lastRun = runs[0];
   const sinceRun = lastRun ? daysBetween(lastRun.date, now) : null;
   const A = acwr(ss), st = streak(ss);
+  if(ss.filter(s=>daysBetween(s.date, now) < 28).length < 6) A.ratio = null;   // poco historial: el cociente no es fiable
   const sc = A.ratio==null ? ["","Sin datos"] : A.ratio<0.8 ? ["warn","Por debajo de tu media"] : A.ratio<=1.3 ? ["ok","En tu zona habitual"] : A.ratio<=1.5 ? ["warn","Subida rápida"] : ["bad","Pico de carga"];
   const box28 = ss.filter(s=>s.cat==="box" && daysBetween(s.date,now)<28).length;
   const alerts = [];
   if(sinceRun!=null && sinceRun>=14) alerts.push(`<div class="banner info">Llevas <b>${sinceRun} días</b> sin correr desde «${esc(lastRun.name)}». Para no perder el nivel, vuelve con una salida suave de 30–40 min.</div>`);
   const cats = ["run","box","walk","futbol","otro"].filter(c=>w.some(x=>x[c]>0));
   return `
-  ${todayCard()}${heroCard(ss)}${stravaBanner()}${alerts.join("")}
+  ${todayCard()}
+  <div class="quick"><button data-sheet="futbol">${QI.foot}<span>Fútbol</span></button><button data-sheet="add">${QI.wod}<span>WOD</span></button><button data-act="story">${QI.share}<span>Compartir</span></button></div>
+  ${heroCard(ss)}${stravaBanner()}${alerts.join("")}
   <div class="card">
-    <div class="row between"><h2>Esta semana</h2><button class="addbtn soft" data-act="story">Compartir mi semana</button></div>
+    <div class="row between"><h2>Esta semana</h2></div>
     ${weekStrip(ss)}
     <div class="grid4">
       <div class="tile"><span class="num">${fMin(sum(cur))}</span><span class="lab">entrenado</span></div>
@@ -716,7 +813,7 @@ function vResumen(){
     <div class="row between"><h3>Carga aguda : crónica</h3><span class="pill ${sc[0]}">${sc[1]}</span></div>
     <div class="row" style="align-items:baseline;gap:6px"><span class="num" style="font-size:44px;line-height:1">${A.ratio==null?"–":A.ratio.toFixed(2)}</span><span class="muted small">últimos 7 días ÷ media semanal de 28 días</span></div>
     <div class="meter"><i style="width:${Math.min(100,(A.ratio||0)/2*100)}%;background:var(--${sc[0]==="ok"?"ok":sc[0]==="bad"?"bad":"warn"})"></i></div>
-    <p class="muted small">Estimación propia: minutos × esfuerzo. Como Strava no guarda tu RPE, uso valores por defecto (box 7, carrera 6, carreras largas o de competición 8). Orientativo, no predice lesiones.</p>
+    <p class="note">Estimación propia: minutos × esfuerzo. Como Strava no guarda tu RPE, uso valores por defecto (box 7, carrera 6, carreras largas o de competición 8). Orientativo, no predice lesiones.</p>
   </div>
   ${bodyCard(true)}
   <div class="card"><h3>Minutos por semana</h3>${stackedWeeks(w)}${legend(cats)}</div>
@@ -928,21 +1025,21 @@ async function openRun(id){
    ========================================================= */
 function calendarCard(){
   const weeks = 26, start = addDays(monday(new Date()), -7*(weeks-1)), t = today();
-  const byDay = {}; allSessions().forEach(s=>{ const k = iso(s.date); (byDay[k] = byDay[k] || {run:0, box:0, otro:0}); byDay[k][s.cat==="run"?"run":s.cat==="box"?"box":"otro"] += s.min; });
-  logs().filter(l=>l.tipo==="wod").forEach(w=>{ byDay[w.fecha] = byDay[w.fecha] || {run:0, box:0, otro:0}; if(!byDay[w.fecha].box) byDay[w.fecha].box = 50; });
+  const byDay = {}; allSessions().forEach(s=>{ const k = iso(s.date); (byDay[k] = byDay[k] || {run:0, box:0, foot:0, otro:0}); byDay[k][s.cat==="run"?"run":s.cat==="box"?"box":s.cat==="futbol"?"foot":"otro"] += s.min; });
+  logs().filter(l=>l.tipo==="wod").forEach(w=>{ byDay[w.fecha] = byDay[w.fecha] || {run:0, box:0, foot:0, otro:0}; if(!byDay[w.fecha].box) byDay[w.fecha].box = 50; });
   const cell = 13, gap = 3, W = 22 + weeks*(cell+gap), H = 7*(cell+gap) + 18;
   let g = "", lastM = -1, active = 0;
   for(let w=0; w<weeks; w++){ const ws = addDays(start, 7*w);
     if(ws.getMonth()!==lastM){ lastM = ws.getMonth(); g += `<text x="${22+w*(cell+gap)}" y="10">${MESES[lastM]}</text>`; }
     for(let d=0; d<7; d++){ const day = addDays(ws, d), k = iso(day); if(k > t) continue;
-      const v = byDay[k], tot = v ? v.run+v.box+v.otro : 0; if(tot) active++;
-      const fill = !tot ? "var(--surface-2)" : v.run && v.box ? "url(#both)" : v.run ? "var(--run)" : v.box ? "var(--box)" : "var(--other)";
+      const v = byDay[k], tot = v ? v.run+v.box+v.foot+v.otro : 0; if(tot) active++;
+      const fill = !tot ? "var(--surface-2)" : v.run && v.box ? "url(#both)" : v.foot ? "var(--foot)" : v.run ? "var(--run)" : v.box ? "var(--box)" : "var(--other)";
       const op = !tot ? 1 : Math.min(1, .45 + tot/120);
       g += `<rect x="${22+w*(cell+gap)}" y="${16+d*(cell+gap)}" width="${cell}" height="${cell}" rx="3" fill="${fill}" fill-opacity="${op}"${k===t?` stroke="var(--fg)" stroke-width="1.5"`:""}><title>${fDate(day)}${tot?` · ${Math.round(tot)} min`:""}</title></rect>`; } }
   ["L","","X","","V","","D"].forEach((l,i)=>{ if(l) g += `<text x="0" y="${16+i*(cell+gap)+10}">${l}</text>`; });
   return `<div class="card"><div class="row between"><h3>Constancia</h3><span class="small muted">${active} días activos en 6 meses</span></div>
     <div><svg class="cal" viewBox="0 0 ${W} ${H}" role="img" aria-label="Calendario de entrenamientos"><defs><linearGradient id="both" x1="0" y1="0" x2="1" y2="1"><stop offset=".5" stop-color="var(--run)"/><stop offset=".5" stop-color="var(--box)"/></linearGradient></defs>${g}</svg></div>
-    <div class="legend"><span><i class="dot" style="background:var(--run)"></i>Carrera</span><span><i class="dot" style="background:var(--box)"></i>Box / WOD</span><span><i class="dot" style="background:linear-gradient(135deg,var(--run) 50%,var(--box) 50%)"></i>Ambos</span></div></div>`;
+    <div class="legend"><span><i class="dot" style="background:var(--run)"></i>Carrera</span><span><i class="dot" style="background:var(--box)"></i>Box / WOD</span><span><i class="dot" style="background:var(--foot)"></i>Fútbol</span><span><i class="dot" style="background:linear-gradient(135deg,var(--run) 50%,var(--box) 50%)"></i>Carrera + box</span></div></div>`;
 }
 function balanceCard(){
   const L = bodyLoad(90), r = L.raw; if(!Object.keys(r).length) return "";
@@ -989,7 +1086,7 @@ function vCorrer(){
       <div class="tile"><span class="num">${fTime(riegel(hm,21.0975,10))}</span><span class="lab">10K estimado</span></div>
       <div class="tile"><span class="num">${fTime(riegel(hm,21.0975,42.195))}</span><span class="lab">Maratón estimado</span></div>
     </div>
-    <p class="muted small">Fórmula de Riegel (T₂ = T₁ × (D₂/D₁)^1,06), cálculo propio. Para maratón suele ser optimista sin tiradas de 28–32 km.</p>
+    <p class="note">Fórmula de Riegel (T₂ = T₁ × (D₂/D₁)^1,06), cálculo propio. Para maratón suele ser optimista sin tiradas de 28–32 km.</p>
   </div>`:""}
   <div class="card"><h3>Ritmo medio por salida</h3>${paceChart(runs)}</div>
   <div class="card">
@@ -1001,14 +1098,14 @@ function vCorrer(){
     <div class="scroll"><table><thead><tr><th>Zona</th><th class="r">Ritmo /km</th></tr></thead><tbody>
     ${zones.map(z=>`<tr><td>${z[0]}</td><td class="r num" style="font-size:17px">${z[1]}</td></tr>`).join("")}
     </tbody></table></div>
-    <p class="muted small">Estimación propia a partir de tu mejor 5K (${fTime(k5)}), no son las zonas oficiales de Strava. Úsalas como guía y ajusta por sensaciones.</p>
+    <p class="note">Estimación propia a partir de tu mejor 5K (${fTime(k5)}), no son las zonas oficiales de Strava. Úsalas como guía y ajusta por sensaciones.</p>
   </div>`:""}
   <div class="card"><div class="row between"><h3>Tus carreras</h3><span class="small muted">toca una para ver mapa y parciales</span></div>
     <div class="runlist">${runs.slice(0, S.runAll?100:8).map(runCard).join("") || `<p class="muted">Sin carreras.</p>`}</div>
     ${runs.length>8?`<button class="ghost" data-act="runall" style="align-self:center">${S.runAll?"Ver menos":`Ver las ${runs.length}`}</button>`:""}</div>
   <div class="card"><div class="row between"><h3>Tus rutas</h3><span class="small muted">${runs.filter(r=>r.poly).length} recorridos</span></div><div id="routesmap" class="routesmap"></div><p class="small muted">Todas tus carreras superpuestas. Toca una línea para abrirla.</p></div>`;
 }
-function syncHint(){ return S.cfg.ghToken ? "" : `<p class="muted small">Se guarda en este dispositivo. Activa la sincronización en <a href="#ajustes">Ajustes</a> para verlo también en el móvil u ordenador.</p>`; }
+function syncHint(){ return S.cfg.ghToken ? "" : `<p class="note">Se guarda en este dispositivo. Activa la sincronización en <a href="#ajustes">Ajustes</a> para verlo también en el móvil u ordenador.</p>`; }
 /* =========================================================
    LEER WOD DESDE FOTO (captura de AimHarder o pizarra)
    El texto se reconoce en el propio móvil con Tesseract.js; la foto no se sube a ningún sitio.
@@ -1275,11 +1372,11 @@ function calcCard(){
   const k = keys.includes(S.calcEx) ? S.calcEx : (keys.find(x=>x==="backsquat") || keys[0]);
   const e = t[k], rm = e.best.rm, pcts = [50,60,65,70,75,80,85,90,95];
   return `<div class="card"><h3>¿Cuánto me pongo?</h3>
-    <p class="muted small">Elige el ejercicio y mira los kilos para el porcentaje que marque el WOD. Uso tu RM más alto conocido: el PR de AimHarder o el que sale de los kilos y repeticiones que apuntas en tus WODs (fórmula de Brzycki), sin fiarme del % que marcaba.</p>
+    <p class="note">Elige el ejercicio y mira los kilos para el porcentaje que marque el WOD. Uso tu RM más alto conocido: el PR de AimHarder o el que sale de los kilos y repeticiones que apuntas en tus WODs (fórmula de Brzycki), sin fiarme del % que marcaba.</p>
     ${field("calc_ex","Ejercicio",`<select id="calc_ex">${keys.map(x=>`<option value="${x}" ${x===k?"selected":""}>${esc(t[x].name)}</option>`).join("")}</select>`)}
     <div class="row" style="align-items:baseline;gap:8px"><span class="num" style="font-size:40px;line-height:1">${rm}</span><span class="small">kg de RM · <span class="muted">${esc(e.best.src)}</span></span></div>
     <div class="pcts">${pcts.map(p=>`<div class="pct${p===70||p===75?" hl":""}"><span class="lab">${p} %</span><span class="num">${Math.round(rm*p/100)}</span></div>`).join("")}</div>
-    <p class="muted small">Redondeado a 1 kg. Si a ese peso te sobran 2 o más repeticiones, tu RM real es más alto: súbelo un 5 % y apunta la marca para que la app lo use.</p>
+    <p class="note">Redondeado a 1 kg. Si a ese peso te sobran 2 o más repeticiones, tu RM real es más alto: súbelo un 5 % y apunta la marca para que la app lo use.</p>
     ${e.list.length>1?`<details><summary class="small">De dónde sale (${e.list.length} referencias)</summary><div class="list">${e.list.map(x=>`<div class="item"><span class="num" style="width:44px">${x.rm}</span><div class="s">${esc(x.src)}</div><span></span></div>`).join("")}</div></details>`:""}
   </div>`;
 }
@@ -1309,7 +1406,7 @@ function prCard(){
     <div class="row between"><h2>Marcas personales</h2>${b["1 mile"]?`<span class="pill">Milla ${fTime(b["1 mile"].t)}</span>`:""}</div>
     <div class="grid3">${tile("5k",5)}${tile("10k",10)}${tile("half-marathon",21.0975)}</div>
     ${prog?`<div class="row" style="gap:6px">${prog}</div>`:""}
-    ${missing?`<p class="muted small">Analizando tus carreras en Strava: faltan ${missing}. Se completan solas al abrir la app (Strava limita las peticiones).</p>`:`<p class="muted small">Tiempos más rápidos dentro de cualquier carrera registrada en Strava, o tu marca oficial si la añades y es mejor.</p>`}
+    ${missing?`<p class="note">Analizando tus carreras en Strava: faltan ${missing}. Se completan solas al abrir la app (Strava limita las peticiones).</p>`:`<p class="note">Tiempos más rápidos dentro de cualquier carrera registrada en Strava, o tu marca oficial si la añades y es mejor.</p>`}
     <div class="row between"><button class="addbtn" data-sheet="pr">+ Marca oficial</button></div>
     ${off.length?`<details><summary class="small">Marcas oficiales (${off.length})</summary><div class="list">${off.map(l=>`<div class="item"><span class="badge" style="background:var(--run)">${esc(l.dist)}</span><div style="min-width:0"><div class="t">${esc(l.tiempo)} · ${esc(l.carrera||"")}</div><div class="s">${fDate(parseISO(l.fecha))}</div></div>${delBtn(l.id)}</div>`).join("")}</div></details>`:""}
   </div>`;
@@ -1368,6 +1465,10 @@ function bodyLoad(days){
     Object.entries(a.vec).forEach(([k,v]) => add(k,v));
     Object.keys(a.moves).forEach(m => { const mv = Body.MOVES.find(x=>x[0]===m); Object.entries(mv[2]).forEach(([k,w8]) => { if(w8>=.5){ by[k] = by[k]||{}; by[k][m] = (by[k][m]||0)+1; } }); });
   });
+  allSessions().filter(s=>s.cat==="futbol" && (!days || daysBetween(s.date, now) < days)).forEach(f => {
+    const k0 = Math.min(1.5, f.min/60);
+    Object.entries(FUT).forEach(([k,v]) => { add(k, v*k0); if(v>=.5){ by[k] = by[k]||{}; by[k]["Fútbol"] = (by[k]["Fútbol"]||0)+1; } });
+  });
   allSessions().filter(s=>s.cat==="run" && (!days || daysBetween(s.date, now) < days)).forEach(r => {
     nR++; const f = Math.min(1.5, r.km/8);
     Object.entries(Body.RUN).forEach(([k,v]) => { add(k, v*f); if(v>=.5){ by[k] = by[k]||{}; by[k]["Carrera (Strava)"] = (by[k]["Carrera (Strava)"]||0)+1; } });
@@ -1397,7 +1498,7 @@ function bodyCard(compact){
       ${info}
     </div>
     <div class="row between"><div class="ramp"><span>menos</span>${[0,1,2,3,4].map(i=>`<i class="r${i}"></i>`).join("")}<span>más</span></div><span class="small muted">${L.nW} WOD${L.nW===1?"":"s"} · ${L.nR} carrera${L.nR===1?"":"s"}</span></div>
-    ${compact?"":`<p class="muted small">Estimación propia: cada movimiento de tus WODs (sin accesorios) y tus carreras de Strava suma a los músculos que trabaja. Toca un músculo para ver con qué lo has trabajado.</p>`}
+    ${compact?"":`<p class="note">Estimación propia: cada movimiento de tus WODs (sin accesorios) y tus carreras de Strava suma a los músculos que trabaja. Toca un músculo para ver con qué lo has trabajado.</p>`}
   </div>`;
 }
 const sideOf = vec => { let f=0, b=0; Object.entries(vec).forEach(([k,v])=>{ const s = Body.MUSCLES[k].v; if(s.includes("f")) f+=v; if(s.includes("b")) b+=v; }); return b>f*1.1 ? "b" : "f"; };
@@ -1433,7 +1534,7 @@ function marcasGrid(){
   const items = Object.entries(by).map(([k,arr])=>{ arr.sort((a,b)=>a.fecha.localeCompare(b.fecha)||(a.creado||0)-(b.creado||0)); const l = arr[arr.length-1];
     const best = rm[k]?.best; return {k, name:l.ejercicio, v:best && /kg/.test(l.unidad) ? best.rm : l.valor, u:l.unidad, n:arr.length, est: best && /kg/.test(l.unidad) && best.src!=="PR de AimHarder" && best.src!=="marca apuntada"}; })
     .sort((a,b)=>a.name.localeCompare(b.name));
-  if(!items.length) return `<p class="muted small">Aún no hay marcas. Pulsa «+» para añadir una o importa la pantalla de PR de AimHarder.</p>`;
+  if(!items.length) return `<p class="note">Aún no hay marcas. Pulsa «+» para añadir una o importa la pantalla de PR de AimHarder.</p>`;
   return `<div class="mgrid">${items.map(i=>`<button class="mtile" data-marca="${i.k}"><span class="mname">${esc(i.name)}</span><span class="mval"><b>${esc(i.v)}</b> ${esc(i.u)}</span>${i.est?`<span class="mtag">desde WOD</span>`:""}</button>`).join("")}</div>`;
 }
 function vBox(){
@@ -1484,6 +1585,7 @@ const SHEETS = {
   evento: () => ["Nueva competición", fmEvento()],
   pr: () => ["Marca oficial", fmPR()],
   run: id => runSheet(id),
+  futbol: p => ["Fútbol", fmFutbol(p||{})],
   hyrox: () => hyroxSheet(),
   hmplan: () => hmSheet(),
   story: url => ["Tu semana", `<div class="stack" style="gap:10px;align-items:center"><img src="${url}" alt="Resumen de tu semana" class="storyimg"><p class="small muted">Mantén pulsada la imagen para guardarla o compartirla.</p></div>`],
@@ -1567,7 +1669,7 @@ function hyroxBlock(){
     <div class="hyx-list">${HYROX.map((st,i)=>{ const c = st.mv.reduce((t,m)=>t+(cnt[m]||0),0), mk = marcas.filter(m=>st.mk.test(m.ejercicio)).sort((a,b)=>b.fecha.localeCompare(a.fecha))[0];
       const lv = c>=4 ? "ok" : c>=1 ? "warn" : "bad";
       return `<div class="hyx-st"><span class="hyx-n">${i+1}</span><div style="min-width:0"><b>${st.n}</b><span class="small muted"> · ${st.d}</span>${mk?`<div class="small">Tu marca: <b>${esc(mk.valor)} ${esc(mk.unidad)}</b> <span class="muted">(${esc(mk.ejercicio.replace(/^hybrid\s*·\s*/i,""))})</span></div>`:""}</div><span class="pill ${lv}">${c ? `${c}× en 90 d` : "sin entrenar"}</span></div>`; }).join("")}</div>
-    <p class="muted small">Veces que aparece cada estación en tus WODs de los últimos 90 días (estimación por los nombres de los ejercicios). Carreras en 28 días: ${runs.length}. Pesos oficiales de Doubles Women Open; confirma el reglamento 26/27 en la web de HYROX.</p>
+    <p class="note">Veces que aparece cada estación en tus WODs de los últimos 90 días (estimación por los nombres de los ejercicios). Carreras en 28 días: ${runs.length}. Pesos oficiales de Doubles Women Open; confirma el reglamento 26/27 en la web de HYROX.</p>
     <details><summary class="small"><b>Cómo repartir en pareja</b></summary><div class="list small">
       <div class="check"><span class="box">·</span><div>Wall balls y burpee broad jumps: relevos cortos (10–15 reps o 20 m) para no llegar al fallo. Si un día no te encuentras bien, bloques aún más cortos en los burpees.</div></div>
       <div class="check"><span class="box">·</span><div>Trineos: tramos de 12,5 m (un largo) y que empuje más quien tenga más fuerza de pierna.</div></div>
@@ -1589,7 +1691,7 @@ function eventCard(e){
       <div class="tile"><span class="num">${goal?fTime(goal):"–"}</span><span class="lab">${goal?`objetivo · ${fPace(goal/km)}/km`:"pon un tiempo objetivo"}</span></div>
       <div class="tile"><span class="num">${pred?fTime(pred):"–"}</span><span class="lab">${pred?`predicción hoy · ${fPace(pred/km)}/km`:"sin marcas aún"}</span></div></div>
       ${goal&&pred?`<p class="small">${goal<pred?`Te faltan <b>${fTime(pred-goal)}</b> (${Math.round((pred-goal)/km)} s/km) para tu objetivo. Con ${wk} semanas es ${ (pred-goal)/km <= 12 ? "realista" : (pred-goal)/km <= 20 ? "exigente pero posible" : "muy ambicioso; quizá un objetivo intermedio"}.`:`Tu predicción actual ya está por debajo del objetivo: puedes subir la ambición.`}</p>`:""}
-      <p class="muted small">Predicción con la fórmula de Riegel desde tu mejor ${refDist===10?"10K":"media"}; es un cálculo propio, no de Strava.</p>`;
+      <p class="note">Predicción con la fórmula de Riegel desde tu mejor ${refDist===10?"10K":"media"}; es un cálculo propio, no de Strava.</p>`;
   } else if(hib && (e.hyrox || /hyrox/i.test(e.nombre))){
     extra = hyroxBlock();
   } else if(hib){
@@ -1615,7 +1717,7 @@ function vObjetivos(){
   return `
   <div class="row between"><h2>Competiciones</h2><button class="addbtn" data-sheet="evento">+ Competición</button></div>
   ${!ev.length?`<div class="card"><p class="small">Añade tus próximas pruebas y la app organiza las semanas hasta ellas.</p></div>`:""}
-  ${sugs.length?`<div class="card"><h3>Añadir rápido</h3><div class="stack" style="gap:8px">${sugs.map(s=>`<button type="button" class="sugbtn" data-sug="${esc(s.nombre)}"><b>${esc(s.nombre)}</b><span class="muted small">${DIAS[dow(parseISO(s.fecha))]} ${fDate(parseISO(s.fecha))} ${s.fecha.slice(0,4)}</span></button>`).join("")}</div><p class="muted small">Comprueba la fecha en la web oficial; se puede borrar y volver a crear.</p></div>`:""}
+  ${sugs.length?`<div class="card"><h3>Añadir rápido</h3><div class="stack" style="gap:8px">${sugs.map(s=>`<button type="button" class="sugbtn" data-sug="${esc(s.nombre)}"><b>${esc(s.nombre)}</b><span class="muted small">${DIAS[dow(parseISO(s.fecha))]} ${fDate(parseISO(s.fecha))} ${s.fecha.slice(0,4)}</span></button>`).join("")}</div><p class="note">Comprueba la fecha en la web oficial; se puede borrar y volver a crear.</p></div>`:""}
   ${ev.map(eventCard).join("")}
   ${ps.length?`<div class="card">
     <div class="row between"><h3>Camino hasta ${ev.length>1?"tus pruebas":"la prueba"}</h3>${cp?`<span class="pill" style="color:${cp.info.c}"><i class="dot" style="background:${cp.info.c}"></i>${cp.info.n}</span>`:""}</div>
@@ -1648,6 +1750,8 @@ function vPlan(){
     {k:"run", t:"Carrera suave (Z2)", n:1, done:Math.min(1,runsWk.length), d:`35–50 min a ${z2}/km. Debes poder hablar en frases completas.`},
     {k:"run", t:"Calidad", n:1, done:Math.min(1,Math.max(0,runsWk.length-1)), d:q[0].toUpperCase()+q.slice(1)+"."}
   ];
+  const fp = footPrefs(), nF = fp.entreno.length + fp.partido.length;
+  if(nF) goals.unshift({k:"futbol", t:"Fútbol", n:nF, done: wk.filter(s=>s.cat==="futbol").length, d:`${fp.entreno.length?`Entreno ${fp.entreno.map(i=>DIAS[i]).join(" y ")}`:""}${fp.entreno.length&&fp.partido.length?" · ":""}${fp.partido.length?`partido ${fp.partido.map(i=>DIAS[i]).join(" y ")}`:""}. Apúntalo al terminar.`});
   if(info.runs>=3) goals.push({k:"run", t:`Tirada larga · ${longKm} km`, n:1, done: longWk>=longKm*0.9?1:0, d:`Suave, ${z2}/km.${cp&&cp.key==="especifico"&&hmP?` Los últimos 4–5 km a ${fPace(hmP)}/km.`:""} Esta semana tu más larga: ${longWk?longWk.toFixed(1)+" km":"ninguna aún"}.`});
   return `
   ${countdownStrip()}
@@ -1655,12 +1759,12 @@ function vPlan(){
     <div class="row between"><h2>Esta semana</h2><span class="pill" style="color:${cp?.info.c||"var(--muted)"}"><i class="dot" style="background:${cp?.info.c||"var(--muted)"}"></i>${info.n}</span></div>
     <p class="small muted">${info.d}</p>
     <div class="list">${goals.map(g=>{ const ok = g.done>=g.n; return `<div class="check"><span class="box ${ok?"done":""}">${ok?"✓":""}</span><div><div class="row" style="gap:6px"><i class="dot" style="background:${COL[g.k]}"></i><b>${g.t}</b><span class="muted small">${Math.min(g.done,g.n)}/${g.n}</span></div><div class="small muted">${g.d}</div></div></div>`; }).join("")}</div>
-    <p class="muted small">Se marca solo con lo que entra de Strava. Ritmos estimados a partir de tu mejor 5K${hmP?" y tu objetivo de media":""}. Deja al menos un día de descanso completo.</p>
+    <p class="note">Se marca solo con lo que entra de Strava. Ritmos estimados a partir de tu mejor 5K${hmP?" y tu objetivo de media":""}. Deja al menos un día de descanso completo.</p>
   </div>
   ${!futuros().length?`<div class="banner info">Añade tus competiciones en <a href="#objetivos">Objetivos</a> y el plan se adapta a cada fase.</div>`:""}
   <div class="card">
     <h3>Pregunta a Claude</h3>
-    <p class="muted small">Copia un resumen de tus datos (entrenos, WODs, marcas y competiciones) y pégalo en un chat con Claude junto a tu pregunta.</p>
+    <p class="note">Copia un resumen de tus datos (entrenos, WODs, marcas y competiciones) y pégalo en un chat con Claude junto a tu pregunta.</p>
     <button class="primary" type="button" data-act="copy">Copiar resumen de mis datos</button>
     <textarea id="copyArea" readonly hidden style="min-height:120px"></textarea>
   </div>`;
@@ -1669,6 +1773,7 @@ function vPlan(){
 function vAjustes(){
   const conn = !!S.tok;
   return `
+  ${footPrefsCard()}
   <div class="card">
     <div class="row between"><h2>Strava</h2><span class="pill ${conn?"ok":""}">${conn?`<i class="dot" style="background:var(--ok)"></i>Conectado${S.athlete?.firstname?" · "+esc(S.athlete.firstname):""}`:"Sin conectar"}</span></div>
     ${S.err.strava?`<div class="banner bad">${esc(S.err.strava.message||"Error con Strava")}</div>`:""}
@@ -1686,7 +1791,7 @@ function vAjustes(){
       <div class="row"><button class="primary" type="submit">${conn?"Volver a conectar":"Conectar con Strava"}</button>
       ${conn?`<button type="button" data-act="refresh">${S.busy.strava?"Actualizando…":"Actualizar ahora"}</button><button type="button" class="ghost danger" data-act="logout">Desconectar</button>`:""}</div>
     </form>
-    <p class="muted small">${conn?"La conexión se renueva sola: no tendrás que volver a conectar salvo que pulses Desconectar o quites el acceso desde Strava. ":""}${S.cfg.ghToken?"Con la sincronización activa, tus otros dispositivos se conectan solos (las claves viajan cifradas en tu Gist secreto). ":"El Client Secret y tus tokens se guardan en este dispositivo. "}${S.stravaAt?`Última actualización: ${fDate(new Date(S.stravaAt))} ${fClock(S.stravaAt)} · ${S.acts.length} actividades.`:""}</p>
+    <p class="note">${conn?"La conexión se renueva sola: no tendrás que volver a conectar salvo que pulses Desconectar o quites el acceso desde Strava. ":""}${S.cfg.ghToken?"Con la sincronización activa, tus otros dispositivos se conectan solos (las claves viajan cifradas en tu Gist secreto). ":"El Client Secret y tus tokens se guardan en este dispositivo. "}${S.stravaAt?`Última actualización: ${fDate(new Date(S.stravaAt))} ${fClock(S.stravaAt)} · ${S.acts.length} actividades.`:""}</p>
   </div>
   <div class="card">
     <div class="row between"><h2>Sincronización</h2><span class="pill ${S.cfg.ghToken&&!S.err.sync?"ok":""}">${S.cfg.ghToken?(S.err.sync?"Error":`<i class="dot" style="background:var(--ok)"></i>Activa`):"Desactivada"}</span></div>
@@ -1704,13 +1809,13 @@ function vAjustes(){
       <div class="row"><button class="primary" type="submit">Guardar y sincronizar</button>
       ${S.cfg.ghToken?`<button type="button" data-act="sync">${S.busy.sync?"Sincronizando…":"Sincronizar ahora"}</button><button type="button" class="ghost danger" data-act="ghoff">Desactivar</button>`:""}</div>
     </form>
-    <p class="muted small">${S.syncAt?`Última sincronización: ${fDate(new Date(S.syncAt))} ${fClock(S.syncAt)}. `:""}Se sincroniza al abrir la app, al volver a ella y cada vez que guardas.${S.cfg.gistId?` <a href="https://gist.github.com/${esc(S.cfg.gistId)}" target="_blank" rel="noopener">Ver el Gist</a>`:""}</p>
+    <p class="note">${S.syncAt?`Última sincronización: ${fDate(new Date(S.syncAt))} ${fClock(S.syncAt)}. `:""}Se sincroniza al abrir la app, al volver a ella y cada vez que guardas.${S.cfg.gistId?` <a href="https://gist.github.com/${esc(S.cfg.gistId)}" target="_blank" rel="noopener">Ver el Gist</a>`:""}</p>
   </div>
   <div class="card">
     <h3>Copia de seguridad</h3>
     <div class="row"><button type="button" data-act="export">Exportar registros (.json)</button>
     <label class="ghost" style="flex-direction:row;align-items:center;gap:8px;cursor:pointer;border:1px solid var(--line);border-radius:10px;padding:10px 14px;color:var(--fg);font-size:15px">Importar<input id="importFile" type="file" accept="application/json,.json" hidden></label></div>
-    <p class="muted small">${logs().length} registros guardados.</p>
+    <p class="note">${logs().length} registros guardados.</p>
   </div>`;
 }
 
@@ -1726,6 +1831,8 @@ function summaryText(){
   if(w.length){ lines.push(`\nWODs:`); w.forEach(l=>lines.push(`${l.fecha} · ${l.nombre} (${l.formato}) · ${l.resultado||"–"} ${l.rx||""} · RPE ${l.rpe||"–"}${l.texto?` · ${l.texto.replace(/\s+/g," ").slice(0,200)}`:""}`)); }
   const mk = logs().filter(l=>l.tipo==="marca");
   if(mk.length){ lines.push(`\nMARCAS BOX:`); mk.forEach(l=>lines.push(`${l.fecha} · ${l.ejercicio}: ${l.valor} ${l.unidad}${l.nota?` (${l.nota})`:""}`)); }
+  const fu = logs().filter(l=>l.tipo==="futbol").slice(-10);
+  if(fu.length){ lines.push(`\nFÚTBOL:`); fu.forEach(l=>lines.push(`${l.fecha} · ${l.formato} · ${l.minutos}′ · esfuerzo ${l.rpe||"–"}${l.notas?` · ${l.notas}`:""}`)); }
   const ev = futuros();
   if(ev.length){ lines.push(`\nCOMPETICIONES:`); ev.forEach(e=>lines.push(`${e.fecha} · ${e.nombre} (${e.clase})${e.objetivo?` · objetivo ${e.objetivo}`:""}${e.notas?` · ${e.notas}`:""}`)); }
   const cp = currentPhase(); if(cp) lines.push(`Fase actual del plan: ${cp.info.n} (${fDate(cp.start)}–${fDate(cp.end)})`);
@@ -1757,6 +1864,7 @@ function renderNow(){
   app.dataset.v = v;
   if(v==="correr") setTimeout(mountRoutes, 0);
   if(!sameView) countUp(app);
+  decorateNotes(app);
   if(sameView){ app.querySelectorAll("input[id],select[id],textarea[id]").forEach(el=>{ if(S.form[el.id]!=null && el.type!=="file") el.value=S.form[el.id]; }); if(focusId){ const f=document.getElementById(focusId); if(f) f.focus({preventScroll:true}); } }
   renderStatus();
 }
@@ -1793,7 +1901,9 @@ document.addEventListener("click", async e=>{
   const hs = e.target.closest("[data-hmstrat]");
   if(hs){ const g = document.getElementById("hm_goal"); if(g) S.hmGoal = parseTime(g.value) || S.hmGoal; S.hmStrat = hs.dataset.hmstrat; renderSheet(); return; }
   const sh = e.target.closest("[data-sheet]");
-  if(sh){ const k = sh.dataset.sheet; openSheet(k, k==="marca" && sh.dataset.ej ? {ejercicio:sh.dataset.ej, unidad:sh.dataset.un} : null); return; }
+  if(sh){ const k = sh.dataset.sheet; openSheet(k, k==="marca" && sh.dataset.ej ? {ejercicio:sh.dataset.ej, unidad:sh.dataset.un} : k==="futbol" ? {formato: sh.dataset.fmt || footRole(dow(new Date())) || "partido"} : null); return; }
+  const fd = e.target.closest("[data-footday]");
+  if(fd){ haptic(); cycleFootDay(+fd.dataset.footday); render(); return; }
   const rn = e.target.closest("[data-run]");
   if(rn){ e.preventDefault(); openRun(rn.dataset.run); return; }
   const wd = e.target.closest("[data-wod]");
@@ -1820,6 +1930,7 @@ document.addEventListener("click", async e=>{
   if(act==="wodall"){ S.wodAll = !S.wodAll; render(); return; }
   if(act==="runall"){ S.runAll = !S.runAll; render(); return; }
   if(act==="close"){ closeSheet(); return; }
+  if(act==="notes"){ e.preventDefault(); const card = a.closest(".card, .today"); card.classList.toggle("notes-on"); S.notesOpen = S.notesOpen || new Set(); const key = a.parentElement.textContent.replace(/i$/,""); card.classList.contains("notes-on") ? S.notesOpen.add(key) : S.notesOpen.delete(key); return; }
   if(act==="story"){ weekStory(); return; }
   if(act==="hxsave"){ upsertRec("hyrox-plan", {tipo:"hyroxplan", fecha:today(), json:JSON.stringify(S.hx)}); haptic(); toast("Plan HYROX guardado"); closeSheet(); return; }
   if(act==="hmsave"){ const ev = futuros().find(x=>x.clase==="carrera" && Math.abs((+String(x.km).replace(",", "."))-21.1)<0.3); const g = parseTime(document.getElementById("hm_goal")?.value);
@@ -1855,9 +1966,10 @@ document.addEventListener("submit", e=>{
   if(kind==="wod") S.ocr = null;
   f.querySelectorAll("input[id],textarea[id],select[id]").forEach(el=>{ delete S.form[el.id]; });
   if(f.closest("#sheet")) closeSheet();
-  toast(kind==="wod" ? "WOD guardado" : kind==="evento" ? "Competición guardada" : "Guardado"); render();
+  haptic(); toast(kind==="wod" ? "WOD guardado" : kind==="evento" ? "Competición guardada" : kind==="futbol" ? "Fútbol guardado" : "Guardado"); render();
 });
 document.addEventListener("input", e=>{
+  if(e.target.id==="f_rpe"){ const o = document.getElementById("f_rpe_v"); if(o) o.textContent = e.target.value+"/10"; }
   if(e.target.dataset && e.target.dataset.hxpct!=null){ const h = hxGet(); h.st[+e.target.dataset.hxpct].pct = +e.target.value; hxUpdate(); }
 });
 // Deslizar entre pestañas
