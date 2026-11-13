@@ -303,6 +303,56 @@ button.big{padding:13px;font-size:16px}
 .bal .balbar i{display:block;height:100%;background:var(--box);border-radius:999px 0 0 999px}
 .radar{max-width:320px;margin:0 auto}
 .radar text{font-size:11px}
+
+/* ---------- Hoy ---------- */
+.today{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:18px 18px 14px;display:flex;flex-direction:column;gap:8px;overflow:hidden}
+.today::before{content:"";position:absolute;inset:0 0 auto 0;height:5px;background:var(--c)}
+.today .tk{font-size:12px;font-weight:700;color:var(--c);background:color-mix(in srgb,var(--c) 14%,transparent);padding:4px 10px;border-radius:999px}
+.today .tt{font-size:32px;line-height:1.02;text-transform:none}
+.today .td{font-size:15px}
+.why{margin:0;padding-left:18px;font-size:12.5px;color:var(--muted);display:flex;flex-direction:column;gap:2px}
+.ck{border-top:1px solid var(--line);padding-top:10px;margin-top:4px}
+.ck summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--fg)}
+.ckrow{display:grid;grid-template-columns:88px minmax(0,1fr);align-items:center;gap:8px;margin-top:8px;font-size:13px;color:var(--muted)}
+.ckseg{display:flex;gap:4px}
+.ckseg button{flex:1;padding:8px 4px;font-size:12.5px;border-radius:9px}
+.ckseg button[aria-pressed="true"]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.addbtn.soft{background:var(--surface-2);color:var(--fg);border:1px solid var(--line)}
+/* ---------- planificadores ---------- */
+.hxsum{background:var(--surface-2);border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.num.huge2{display:block;font-family:var(--display);font-weight:800;font-size:54px;line-height:1}
+.num.huge2 small{font-size:22px;color:var(--muted)}
+.hxs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.hxs div{display:flex;flex-direction:column}.hxs b{font-family:var(--display);font-size:20px}.hxs span{font-size:11.5px;color:var(--muted)}
+.hxbar{width:100%;height:18px;border-radius:6px;overflow:hidden;display:block}
+.hxrow{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.hxrow span{display:flex;flex-direction:column}.hxrow small{font-size:12px;color:var(--muted)}
+.stepper{display:flex;align-items:center;gap:6px}
+.stepper button{width:38px;height:38px;padding:0;border-radius:50%;font-size:20px;line-height:1}
+.stepper b{font-family:var(--display);font-size:22px;min-width:58px;text-align:center}
+.stepper.sm button{width:32px;height:32px;font-size:17px}.stepper.sm b{font-size:18px;min-width:44px}
+.hxst{background:var(--surface-2);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.hxst input[type=range]{flex:1;accent-color:var(--box);padding:0;border:0;background:none}
+.kmgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(70px,1fr));gap:6px}
+.kmc{background:var(--surface-2);border-radius:10px;padding:6px 8px;display:flex;flex-direction:column;line-height:1.15;position:relative}
+.kmc .k{font-size:11px;color:var(--muted)}.kmc b{font-family:var(--display);font-size:19px}.kmc small{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.kmc.gel::after,.gelmark{content:"";width:9px;height:9px;border-radius:50%;background:var(--warn);display:inline-block}
+.kmc.gel::after{position:absolute;top:7px;right:7px}
+.storyimg{width:min(100%,320px);border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.3)}
+/* ---------- fluidez ---------- */
+@media (prefers-reduced-motion:no-preference){
+  .view.from-right{animation:inR .28s cubic-bezier(.2,.8,.2,1)}
+  .view.from-left{animation:inL .28s cubic-bezier(.2,.8,.2,1)}
+  @keyframes inR{from{transform:translateX(24px)}to{transform:none}}
+  @keyframes inL{from{transform:translateX(-24px)}to{transform:none}}
+  button,.wodc,.runc,.mtile,.act{transition:transform .12s ease,background-color .2s,border-color .2s}
+  button:active,.wodc:active,.runc:active,.mtile:active,.act:active{transform:scale(.97)}
+}
+nav.tabs a{position:relative}
+nav.tabs a[aria-current="page"]::before{content:"";position:absolute;top:6px;width:52px;height:30px;border-radius:999px;background:color-mix(in srgb,var(--box) 14%,transparent);z-index:-1}
+nav.tabs a[aria-current="page"] svg{stroke:var(--box)}
+nav.tabs a[aria-current="page"]{color:var(--fg)}
+nav.tabs .in{isolation:isolate}
 </style>
 </head>
 <body>
