@@ -339,7 +339,7 @@ function bestEfforts(){
   const put = (k, r) => { if(!out[k] || r.t < out[k].t) out[k] = r; };
   S.acts.filter(a=>catOf(a.sport||"")==="run").forEach(a => {
     const det = S.det[a.id] || {}, be = det.be || [];
-    be.forEach(b => { const k = String(b.n).toLowerCase(); if(BE[k]) put(k, {t:b.t, d:b.d, act:a.name, id:a.id, src:"strava"}); });
+    be.forEach(b => { const k = String(b.n).toLowerCase(); if(BE[k]) put(k, {t:b.t, d:b.d || a.start, act:a.name, id:a.id, src:"strava"}); });
     if(!be.length && det.sp && det.sp.length){
       const full = det.sp.filter(x=>x[0]>=950).map(x=>x[1]);
       const best = n => { if(full.length<n) return null; let m = Infinity; for(let i=0;i+n<=full.length;i++){ const t = full.slice(i,i+n).reduce((u,v)=>u+v,0); if(t<m) m = t; } return m; };
@@ -1021,7 +1021,11 @@ function bento(ss){
   let phaseP = 0; if(cp){ phaseP = Math.min(1, (daysBetween(cp.start, now)+1)/(daysBetween(cp.start, cp.end)+1)); }
   const T = (href, cls, inner, label) => `<a class="bt ${cls}" href="${href}" aria-label="${label}">${inner}<span class="go" aria-hidden="true">›</span></a>`;
   return `<div class="bento">
-    ${T("#objetivos", "b-goal wide", e ? `<span class="bl">Próximo objetivo</span><div class="brow"><span class="num bnum" data-count="${daysBetween(now, parseISO(e.fecha))}">${daysBetween(now, parseISO(e.fecha))}</span><span class="bcol"><b>días</b><span class="bname">${esc(e.nombre)}</span>${cp?`<span class="bsub">Fase ${cp.info.n} · ${Math.round(phaseP*100)}%</span>`:""}</span></div>${prep?`<span class="bsub">Antes: ${esc(prep.nombre)} · ${DIAS[dow(parseISO(prep.fecha))]} ${fDate(parseISO(prep.fecha))}</span>`:""}` : `<span class="bl">Objetivos</span><span class="bname">Añade tu próxima competición</span>`, "Objetivos")}
+    ${T("#objetivos", "b-goal wide", (()=>{ const fu = futuros(); if(!fu.length) return `<span class="bl">Objetivos</span><span class="bname">Añade tu próxima competición</span>`;
+      const n0 = fu[0], d0 = daysBetween(now, parseISO(n0.fecha));
+      return `<span class="bl">${evPrio(n0)==="A"?"Próximo objetivo":"Próxima carrera"}</span>
+      <div class="brow"><span class="num bnum" data-count="${d0}">${d0}</span><span class="bcol"><b>días</b><span class="bname">${evPrio(n0)==="A"?"★ ":""}${esc(n0.nombre)}</span><span class="bsub">${DIAS[dow(parseISO(n0.fecha))]} ${fDate(parseISO(n0.fecha))}${evKm(n0)?` · ${evKm(n0)>=21?(evKm(n0)>=42?"maratón":"media"):evKm(n0)+" km"}`:""}${cp && evPrio(n0)==="A"?` · fase ${cp.info.n.toLowerCase()}`:""}</span></span></div>
+      ${fu.length>1?`<div class="gnext">${fu.slice(1,4).map(x=>`<span><b>${daysBetween(now, parseISO(x.fecha))}</b> días · ${evPrio(x)==="A"?"★ ":""}${esc(x.nombre)}</span>`).join("")}</div>`:""}`; })(), "Objetivos")}
     ${T("#plan", "b-week", `<span class="bl">Tu semana</span>${miniRing(wg.n? wg.d/wg.n : 0, "#fff", `${wg.d}/${wg.n}`)}<span class="bsub">sesiones del plan</span>`, "Plan de la semana")}
     ${T("#correr", "b-run", `<span class="bl">Correr</span><span class="bbig"><b data-count="${Math.round(kmM)}">${Math.round(kmM)}</b> km</span><span class="bsub">este mes</span>${lr && lr.poly ? `<span class="bthumb">${routeThumb(lr.poly, 44)}</span>` : ""}`, "Correr")}
     ${T("#box", "b-box", `<span class="bl">Último WOD</span>${wod ? `<span class="bname sm">${esc(wod.nombre.split("·")[0].trim())}</span>${wod.resultado?`<span class="bres">${esc(wod.resultado)}</span>`:""}<span class="bsub">${fDate(parseISO(wod.fecha))}</span>` : `<span class="bsub">Sube tu primera captura</span>`}`, "Box")}
@@ -1196,10 +1200,24 @@ function zonesCard(){
     <div class="zlist">${Z.map((z,i)=>`<div class="zr"><span class="zd" style="background:${z[4]}">${z[0]}</span><span class="zn">${z[1]}</span><b>${i===0?`+${fPace(z[3])}`:i===5?`−${fPace(z[2])}`:`${fPace(z[2])}–${fPace(z[3])}`}</b></div>`).join("")}</div>
     <p class="note">Estimación propia a partir de tu mejor 5K (${fTime(k5)}): ritmos por km, de más lento a más rápido. No son las zonas oficiales de Strava; ajusta por sensaciones.</p></div>`;
 }
+function myRaces(){
+  const fu = futuros(); const now = new Date();
+  const card = e => { const d = parseISO(e.fecha), days = daysBetween(now, d), A = evPrio(e)==="A", hib = e.clase==="hibrida", D = evKm(e), g = parseTime(e.objetivo);
+    const DD = Math.abs(D-21.1)<0.3 ? 21.0975 : Math.abs(D-42.2)<0.3 ? 42.195 : D;
+    return `<div class="mrc ${A?"a":"b"} ${hib?"hx":""}">
+      <div class="row between"><span class="mtag2">${A?"★ Objetivo principal":"Preparación"}</span><span class="mdate">${DIAS[dow(d)]} ${fDate(d)}</span></div>
+      <div class="mrow"><span class="num mbig" data-count="${days}">${days}</span><span class="mcol"><b>${days===1?"día":"días"}</b><span class="mrname">${esc(e.nombre)}</span></span></div>
+      <div class="mfoot">${hib?`<span class="mch">HYROX</span>`:D?`<span class="mch">${DD>=42?"Maratón":DD>=21?"Media":D+" km"}</span>`:""}${g?`<span class="mch">Objetivo ${fTime(g)}${DD?` · ${fPace(g/DD)}/km`:""}</span>`:""}</div>
+      ${hib ? `<button class="mbtn" data-sheet="hyrox">Planificar</button>` : D ? `<button class="mbtn" data-sheet="hmplan" data-ev="${e.id}">Plan por km</button>` : ""}
+    </div>`; };
+  return `<div class="sect"><h2>Tus carreras</h2><a class="linkbtn" href="#objetivos">Ver plan</a></div>
+  <div class="mrs">${fu.map(card).join("")}<button class="mrc add" data-sheet="races"><span class="plus">+</span><b>Apuntarme a otra</b><span class="small">Carreras en Madrid</span></button></div>`;
+}
 function vCorrer(){
   const ss = allSessions(), runs = ss.filter(s=>s.cat==="run");
   return `
   ${stravaBanner()}
+  ${myRaces()}
   ${runHero(runs)}
   ${prCard()}
   ${levelCard()}
