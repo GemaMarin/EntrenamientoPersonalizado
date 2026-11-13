@@ -263,6 +263,7 @@ async function doSyncGist(){
     const merged = merge(remote.registros, S.recs);
     const changedRemote = JSON.stringify(sortRecs(merged)) !== JSON.stringify(sortRecs(remote.registros));
     S.recs = merged; if(migrate()) dirty = true; LS.set("recs", S.recs);
+    const nf = autoFillFoot(); if(nf){ dirty = true; setTimeout(()=>toast(`${nf} entrenos de fútbol añadidos desde septiembre`), 300); }
     // Credenciales: gana la más reciente (la última que renovó el token)
     const rc = wipeCred ? null : await openCred(remote.secreto);
     const localAt = S.tok?.at || 0, remoteAt = rc?.tok?.at || 0;
@@ -495,7 +496,7 @@ function cycleFootDay(i){
    ========================================================= */
 function footTimes(){
   const r = logs().find(l=>l.tipo==="pref" && l.id==="pref-futbol") || {};
-  return {entreno:{h:r.hEntreno||"21:00", d:+r.dEntreno||75}, partido:{h:r.hPartido||"11:00", d:+r.dPartido||90}};
+  return {entreno:{h:r.hEntreno||"21:00", d:+r.dEntreno||75}, partido:{h:r.hPartido||"11:00", d:+r.dPartido||60}};
 }
 function footPending(){
   const p = footPrefs(), T = footTimes(), now = new Date(), out = [];
@@ -1189,6 +1190,7 @@ function vCorrer(){
   <div class="card"><h3>Evolución del ritmo</h3>${paceChart(runs)}</div>
   <div class="card"><div class="row between"><h3>Km por mes</h3><span class="small muted">${Math.round(runs.filter(r=>daysBetween(r.date,new Date())<365).reduce((t,r)=>t+r.km,0))} km en 12 meses</span></div>${monthlyKm(runs)}</div>
   ${zonesCard()}
+  ${racesCard()}
   <div class="card"><div class="row between"><h2>Tus carreras</h2><span class="small muted">${runs.length}</span></div>
     <div class="runlist">${runs.slice(0, S.runAll?100:6).map(runCard).join("") || `<p class="muted">Sin carreras.</p>`}</div>
     ${runs.length>6?`<button class="ghost" data-act="runall" style="align-self:center">${S.runAll?"Ver menos":`Ver las ${runs.length}`}</button>`:""}</div>
@@ -1749,11 +1751,11 @@ function fmMarca(p={}){ return `<form data-form="marca">
   <div class="grid2">${field("m_fecha","Fecha",`<input id="m_fecha" name="fecha" type="date" value="${val(p.fecha||today())}" required>`)}
   ${field("m_nota","Nota",`<input id="m_nota" name="nota" value="${val(p.nota)}" placeholder="1RM real · 3×42">`)}</div>
   <button class="primary big" type="submit">Guardar marca</button></form>`; }
-function fmEvento(){ return `<form data-form="evento">
-  ${field("e_n","Nombre",`<input id="e_n" name="nombre" placeholder="Medio Maratón de Madrid" required>`)}
-  <div class="grid2">${field("e_f","Fecha",`<input id="e_f" name="fecha" type="date" required>`)}
+function fmEvento(p={}){ return `<form data-form="evento">
+  ${field("e_n","Nombre",`<input id="e_n" name="nombre" value="${val(p.nombre)}" placeholder="Medio Maratón de Madrid" required>`)}
+  <div class="grid2">${field("e_f","Fecha",`<input id="e_f" name="fecha" type="date" value="${val(p.fecha)}" required>`)}
   ${field("e_c","Tipo",`<select id="e_c" name="clase"><option value="carrera">Carrera a pie</option><option value="hibrida">Híbrida / Hyrox</option><option value="otra">Otra</option></select>`)}</div>
-  <div class="grid2">${field("e_km","Distancia (km)",`<input id="e_km" name="km" inputmode="decimal" placeholder="21.0975">`)}
+  <div class="grid2">${field("e_km","Distancia (km)",`<input id="e_km" name="km" inputmode="decimal" value="${val(p.km)}" placeholder="21.0975">`)}
   ${field("e_o","Tiempo objetivo",`<input id="e_o" name="objetivo" placeholder="1:45:00">`)}</div>
   ${field("e_no","Notas",`<input id="e_no" name="notas" placeholder="Pareja, categoría, estaciones…">`)}
   <button class="primary big" type="submit">Guardar competición</button></form>`; }
@@ -1839,15 +1841,105 @@ function wodCard(w){
     <span class="wmini">${Body.figure(sideOf(a.vec), a.vec, {id:w.id})}</span>
   </button>`;
 }
-function marcasGrid(){
+/* =========================================================
+   CARRERAS POPULARES · Comunidad de Madrid
+   Datos públicos recopilados el 13-11-2026 de calendarios y webs oficiales. "conf" = fecha confirmada por la organización o varias fuentes.
+   ========================================================= */
+const RACES = [
+  {f:"2026-11-15", n:"Carrera Ponle Freno", l:"Madrid", d:[5,10], conf:false, u:"https://www.runnea.com/carreras-populares/calendario/madrid/"},
+  {f:"2026-11-28", n:"10K de Carabanchel", l:"Madrid · Carabanchel", d:[10], conf:false, u:"https://carrerapopular.com/carreras/madrid"},
+  {f:"2026-11-29", n:"Carrera Tecnocasa Vuela Valdebebas", l:"Madrid · Valdebebas", d:[5,10,21.1], conf:false, u:"https://carrerapopular.com/carreras/madrid"},
+  {f:"2026-12-12", n:"Carrera de Paracuellos de Jarama", l:"Paracuellos de Jarama", d:[], conf:true, u:"https://reko-app.com/blog/calendario-carreras-diciembre-2026/"},
+  {f:"2026-12-13", n:"Carrera de las Empresas", l:"Madrid", d:[], conf:false, u:"https://www.clubrunning.es/calendario/comunidad/Madrid?comunidad=Madrid"},
+  {f:"2026-12-19", n:"San Silvestre de Hortaleza", l:"Madrid · Hortaleza", d:[5,10], conf:true, u:"https://reko-app.com/running/asfalto/5k/comunidad-de-madrid/"},
+  {f:"2026-12-31", n:"San Silvestre Vallecana", l:"Madrid · Bernabéu → Vallecas", d:[10], conf:true, u:"https://www.esmadrid.com/en/whats-on/sansilvestre-madrid", note:"Inscripción hasta el 23 dic"},
+  {f:"2027-01-24", n:"Carrera Sanchinarro", l:"Madrid · Sanchinarro", d:[], conf:false, u:"https://www.clubrunning.es/calendario/comunidad/Madrid?comunidad=Madrid"},
+  {f:"2027-01-31", n:"Media Maratón Ciudad de Getafe", l:"Getafe", d:[21.1], conf:true, u:"https://www.mediadegetafe.com/en", note:"Salida 10:30 · inscripción hasta el 25 ene"},
+  {f:"2027-02-14", n:"Carrera de la Primavera", l:"Madrid", d:[], conf:false, u:"https://www.clubrunning.es/calendario/comunidad/Madrid?comunidad=Madrid"},
+  {f:"2027-02-28", n:"MetLife Madrid 15K", l:"Madrid", d:[15], conf:false, u:"https://www.finishers.com/en/activities/road-running/running-races-in-spain/running-races-in-the-community-of-madrid"},
+  {f:"2027-03-21", n:"HYROX Madrid (17–21 mar)", l:"IFEMA Madrid", d:[], hx:true, conf:true, u:"https://www.esmadrid.com/agenda/hyrox-madrid-ifema-madrid"},
+  {f:"2027-04-04", n:"Movistar Madrid Medio Maratón", l:"Madrid · Recoletos", d:[21.1], conf:true, u:"https://www.mediomaratonmadrid.es", note:"Salida 9:15 · inscripción hasta el 15 feb"},
+  {f:"2027-04-25", n:"Rock 'n' Roll Madrid Maratón", l:"Madrid · Castellana", d:[42.2, 21.1], conf:true, u:"https://www.esmadrid.com/en/whats-on/rock-n-roll-madrid-maraton", note:"Salida 8:00 · media en la misma jornada"}
+];
+const RMORE = [["Runnea","https://www.runnea.com/carreras-populares/calendario/madrid/"],["Ahotu","https://www.ahotu.com/calendar/running/madrid-esp"],["Ayuntamiento de Madrid","https://www.madrid.es/portales/munimadrid/es/Inicio/Cultura-ocio-y-deporte/Publicaciones/Proximas-carreras-urbanas/?vgnextfmt=default&vgnextoid=98bc9c14c7916610VgnVCM1000001d4a900aRCRD&vgnextchannel=f9e2f073808fe410VgnVCM2000000c205a0aRCRD"],["REKO","https://reko-app.com/running/asfalto/10k/comunidad-de-madrid/"]];
+const DFIL = [["all","Todas"],["5","5K"],["10","10K"],["15","15K"],["21.1","Media"],["42.2","Maratón"],["hx","HYROX"]];
+const dLabel = x => x===21.1 ? "Media" : x===42.2 ? "Maratón" : x+"K";
+function raceList(){
+  const t = today(), f = S.rf || "all", q = norm(S.rq || "");
+  return RACES.filter(r=>r.f>=t)
+    .filter(r=> f==="all" ? true : f==="hx" ? r.hx : r.d.includes(+f))
+    .filter(r=> !q || norm(r.n+" "+r.l).includes(q));
+}
+function raceCard(r){
+  const d = parseISO(r.f), days = daysBetween(new Date(), d), mine = eventos().some(e=>e.fecha===r.f && norm(e.nombre).includes(norm(r.n).slice(0,10)));
+  return `<div class="race">
+    <span class="wdate"><b>${d.getDate()}</b><span>${MESES[d.getMonth()]}</span></span>
+    <div class="rcb"><b class="rn">${esc(r.n)}</b><span class="small muted">${esc(r.l)} · ${DIAS[dow(d)]} · ${days===0?"hoy":`en ${days} días`}</span>
+      <div class="mchips run">${r.d.map(x=>`<i>${dLabel(x)}</i>`).join("")}${r.hx?`<i>HYROX</i>`:""}${!r.d.length && !r.hx?`<i>distancias por confirmar</i>`:""}<span class="pill ${r.conf?"ok":"warn"}">${r.conf?"Confirmada":"Por confirmar"}</span></div>
+      ${r.note?`<span class="small">${esc(r.note)}</span>`:""}
+      <div class="row" style="gap:8px"><a class="ghost small rlink" href="${esc(r.u)}" target="_blank" rel="noopener">Ver web</a>${mine?`<span class="pill ok">En tus competiciones</span>`:`<button class="ghost small" data-addrace="${esc(r.f)}|${esc(r.n)}">+ Añadir a mis competiciones</button>`}</div></div>
+  </div>`;
+}
+function racesSheet(){
+  const L = raceList(), f = S.rf || "all";
+  return ["Carreras en Madrid", `<div class="stack" style="gap:12px">
+    <input id="rq" type="search" placeholder="Buscar por nombre o zona" value="${esc(S.rq||"")}">
+    <div class="chiprow">${DFIL.map(([v,l])=>`<button type="button" data-rf="${v}" aria-pressed="${f===v}">${l}</button>`).join("")}</div>
+    <span class="small muted">${L.length} carrera${L.length===1?"":"s"} próximas</span>
+    <div class="stack" style="gap:8px">${L.map(raceCard).join("") || `<p class="small muted">No hay carreras con ese filtro.</p>`}</div>
+    <div class="note" style="display:block">Lista recopilada el 13 nov 2026 de calendarios públicos y webs oficiales. Las marcadas «Por confirmar» pueden cambiar: comprueba siempre en la web. Más carreras en ${RMORE.map(([n,u])=>`<a href="${u}" target="_blank" rel="noopener">${n}</a>`).join(", ")}.</div>
+  </div>`];
+}
+function racesCard(){
+  const next = RACES.filter(r=>r.f>=today()).slice(0,3);
+  return `<div class="card"><div class="row between"><h2>Carreras en Madrid</h2><button class="addbtn soft" data-sheet="races">Explorar</button></div>
+    <div class="rnext">${next.map(r=>{ const d = parseISO(r.f); return `<button class="rmini" data-sheet="races"><span class="wdate"><b>${d.getDate()}</b><span>${MESES[d.getMonth()]}</span></span><span class="rcb"><b>${esc(r.n)}</b><span class="small muted">${r.d.length?r.d.map(dLabel).join(" · "):r.hx?"HYROX":"por confirmar"}</span></span></button>`; }).join("")}</div></div>`;
+}
+
+/* =========================================================
+   MARCAS DE BOX: compactas + panel con buscador
+   ========================================================= */
+const MPRIO = ["backsquat","frontsquat","deadlift","powerclean","benchpres","shoulderpres","thruster","squatclean","sumodeadlift","overheadsquat","pushjerk","pushpres"];
+const MGROUP = [["Sentadillas",/squat|lunge|zancad/i],["Peso muerto",/dead ?lift|peso muerto/i],["Halterofilia",/clean|snatch|jerk/i],["Press",/press|bench|floor/i],["Estaciones y cardio",/hybrid|ski|remo|row|farmer|bike|wall ?ball|burpee|box jump/i]];
+function marcaItems(){
   const by = {}; logs().filter(l=>l.tipo==="marca").forEach(m=>{ const k = norm(m.ejercicio).replace(/s$/,""); (by[k]=by[k]||[]).push(m); });
   const rm = rmTable();
-  const items = Object.entries(by).map(([k,arr])=>{ arr.sort((a,b)=>a.fecha.localeCompare(b.fecha)||(a.creado||0)-(b.creado||0)); const l = arr[arr.length-1];
-    const best = rm[k]?.best; return {k, name:l.ejercicio, v:best && /kg/.test(l.unidad) ? best.rm : l.valor, u:l.unidad, n:arr.length, est: best && /kg/.test(l.unidad) && best.src!=="PR de AimHarder" && best.src!=="marca apuntada"}; })
-    .sort((a,b)=>a.name.localeCompare(b.name));
-  if(!items.length) return `<p class="note">Aún no hay marcas. Pulsa «+» para añadir una o importa la pantalla de PR de AimHarder.</p>`;
-  return `<div class="mgrid">${items.map(i=>`<button class="mtile" data-marca="${i.k}"><span class="mname">${esc(i.name)}</span><span class="mval"><b>${esc(i.v)}</b> ${esc(i.u)}</span>${i.est?`<span class="mtag">desde WOD</span>`:""}</button>`).join("")}</div>`;
+  return Object.entries(by).map(([k,arr])=>{ arr.sort((a,b)=>a.fecha.localeCompare(b.fecha)||(a.creado||0)-(b.creado||0)); const l = arr[arr.length-1], best = rm[k]?.best;
+    return {k, name:l.ejercicio, v: best && /kg/.test(l.unidad) ? best.rm : l.valor, u:l.unidad, est: best && /kg/.test(l.unidad) && best.src!=="PR de AimHarder" && best.src!=="marca apuntada", last:l.fecha}; });
 }
+const mTile = i => `<button class="mtile sm" data-marca="${i.k}"><span class="mname">${esc(i.name.replace(/^hybrid\s*·\s*/i,""))}</span><span class="mval"><b>${esc(i.v)}</b> ${esc(i.u)}</span></button>`;
+function marcasGrid(){
+  const items = marcaItems();
+  if(!items.length) return `<p class="small muted">Aún no hay marcas. Pulsa «+ Marca» o importa la pantalla de PR de AimHarder.</p>`;
+  const top = MPRIO.map(k=>items.find(i=>i.k===k)).filter(Boolean);
+  items.sort((a,b)=>b.last.localeCompare(a.last)).forEach(i=>{ if(top.length<6 && !top.includes(i)) top.push(i); });
+  return `<div class="mgrid3">${top.slice(0,6).map(mTile).join("")}</div>
+    ${items.length>6?`<button class="ghost" data-sheet="marcas" style="align-self:center">Ver todas (${items.length})</button>`:""}`;
+}
+function marcasSheet(){
+  const q = norm(S.mq||""), items = marcaItems().filter(i=>!q || norm(i.name).includes(q)).sort((a,b)=>a.name.localeCompare(b.name));
+  const used = new Set();
+  const groups = MGROUP.map(([g,re])=>[g, items.filter(i=>{ if(used.has(i.k) || !re.test(i.name)) return false; used.add(i.k); return true; })]);
+  groups.push(["Otras", items.filter(i=>!used.has(i.k))]);
+  return ["Todas tus marcas", `<div class="stack" style="gap:12px">
+    <input id="mq" type="search" placeholder="Buscar ejercicio" value="${esc(S.mq||"")}">
+    ${groups.filter(([,l])=>l.length).map(([g,l])=>`<div class="stack" style="gap:6px"><span class="eyebrow">${g} · ${l.length}</span><div class="mgrid3">${l.map(mTile).join("")}</div></div>`).join("")}
+    <button class="primary" data-sheet="marca">+ Nueva marca</button></div>`];
+}
+
+/* =========================================================
+   FÚTBOL: relleno automático de la temporada (una vez)
+   ========================================================= */
+function firstMondaySept(){ const t = new Date(), y = t.getMonth()>=7 ? t.getFullYear() : t.getFullYear()-1; let d = new Date(y, 8, 1); while(dow(d)!==0) d = addDays(d,1); return iso(d); }
+function autoFillFoot(){
+  const flag = "flag-futfill-"+firstMondaySept().slice(0,4);
+  if(logs().some(l=>l.id===flag) || !logs().length) return 0;   // solo una vez y solo si ya usas la app
+  const T = footTimes(), y = iso(addDays(new Date(), -1)), list = fillPlan(firstMondaySept(), y, true, false);
+  list.forEach(x=>upsertRec("fut-auto-"+x.fecha, {tipo:"futbol", fecha:x.fecha, formato:"entreno", minutos:String(T.entreno.d), rpe:"7", origen:"relleno"}));
+  upsertRec(flag, {tipo:"flag", fecha:today()});
+  return list.length;
+}
+
 function vBox(){
   const ss = allSessions(), now = new Date();
   const box = ss.filter(s=>s.cat==="box");
@@ -1893,10 +1985,12 @@ const SHEETS = {
     </div>${syncHint()}`],
   wod: p => [p && p.nombre ? "Revisa el WOD" : "Nuevo WOD", `${p && p.fuerza && p.fuerza.kg ? `<div class="banner info small"><b>${esc(p.fuerza.ejercicio)} ${p.fuerza.series}×${p.fuerza.reps} con ${p.fuerza.kg} kg</b> → 1RM estimado ≈ <b>${Math.round(p.fuerza.rm)} kg</b> (Brzycki). <button class="ghost" data-act="sug-marca">Guardar en marcas</button></div>`:""}${fmWod(p||{})}`],
   marca: p => ["Nueva marca", fmMarca(p||{})],
-  evento: () => ["Nueva competición", fmEvento()],
+  evento: p => ["Nueva competición", fmEvento(p||{})],
   pr: () => ["Marca oficial", fmPR()],
   run: id => runSheet(id),
   quick: () => quickSheet(),
+  races: () => racesSheet(),
+  marcas: () => marcasSheet(),
   voice: () => voiceSheet(),
   futfill: () => futFillSheet(),
   futbol: p => ["Fútbol", fmFutbol(p||{})],
@@ -2223,6 +2317,10 @@ document.addEventListener("click", async e=>{
   if(hs){ const g = document.getElementById("hm_goal"); if(g) S.hmGoal = parseTime(g.value) || S.hmGoal; S.hmStrat = hs.dataset.hmstrat; renderSheet(); return; }
   const sh = e.target.closest("[data-sheet]");
   if(sh){ const k = sh.dataset.sheet; openSheet(k, k==="marca" && sh.dataset.ej ? {ejercicio:sh.dataset.ej, unidad:sh.dataset.un} : k==="futbol" ? {formato: sh.dataset.fmt || footRole(dow(new Date())) || "partido"} : null); return; }
+  const rf = e.target.closest("[data-rf]");
+  if(rf){ S.rf = rf.dataset.rf; renderSheet(); return; }
+  const ar = e.target.closest("[data-addrace]");
+  if(ar){ const [f, n] = ar.dataset.addrace.split("|"), r = RACES.find(x=>x.f===f && x.n===n); if(r){ const km = r.d.length ? (r.d.includes(21.1) ? 21.0975 : r.d.includes(42.2) ? 42.195 : Math.max(...r.d)) : ""; openSheet("evento", {nombre:r.n, fecha:r.f, km: km ? String(km) : ""}); } return; }
   const fa = e.target.closest("[data-fask]");
   if(fa){ answerFoot(fa.dataset.fask==="si", fa.dataset.f, fa.dataset.r); return; }
   const th = e.target.closest("[data-theme-set]");
@@ -2315,6 +2413,7 @@ document.addEventListener("submit", e=>{
   haptic(); toast(kind==="wod" ? "WOD guardado" : kind==="evento" ? "Competición guardada" : kind==="futbol" ? "Fútbol guardado" : "Guardado"); render();
 });
 document.addEventListener("input", e=>{
+  if(e.target.id==="rq" || e.target.id==="mq"){ S[e.target.id] = e.target.value; const id = e.target.id, pos = e.target.selectionStart; renderSheet(); const el = document.getElementById(id); if(el){ el.focus(); try{ el.setSelectionRange(pos, pos); }catch(err){} } return; }
   if(e.target.id==="f_rpe"){ const o = document.getElementById("f_rpe_v"); if(o) o.textContent = e.target.value+"/10"; }
   if(e.target.dataset && e.target.dataset.hxpct!=null){ const h = hxGet(); h.st[+e.target.dataset.hxpct].pct = +e.target.value; hxUpdate(); }
 });
@@ -2350,6 +2449,7 @@ setInterval(()=>{ if(document.visibilityState==="visible") syncGist(); }, 60*100
 
 /* ---------- arranque ---------- */
 if(migrate()){ LS.set("recs", S.recs); schedulePush(); }
+if(!S.cfg.ghToken){ const nf = autoFillFoot(); if(nf) setTimeout(()=>toast(`${nf} entrenos de fútbol añadidos desde septiembre`), 600); }
 applyTheme();
 render();
 (async ()=>{
