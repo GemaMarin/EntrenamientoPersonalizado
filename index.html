@@ -551,6 +551,23 @@ nav.tabs a[aria-current="page"]::before{top:8px;width:54px;height:32px}
 .onb h1{font-size:34px}.onb p{color:var(--muted);font-size:16px;max-width:32ch}
 .dots{display:flex;gap:6px}.dots i{width:8px;height:8px;border-radius:999px;background:var(--line);transition:width .2s}.dots i.on{width:22px;background:var(--box)}
 .onb .primary{width:100%;margin-top:10px}
+
+/* ---------- pregunta de fútbol y voz ---------- */
+.ask{display:flex;flex-direction:column;gap:8px}
+.askrow{display:grid;grid-template-columns:40px minmax(0,1fr) auto;gap:10px;align-items:center;background:var(--surface);box-shadow:var(--shadow);border-radius:18px;padding:12px 14px;border-left:4px solid var(--foot)}
+.askico{width:40px;height:40px;border-radius:12px;background:color-mix(in srgb,var(--foot) 14%,transparent);display:grid;place-items:center}
+.askico svg{width:22px;height:22px;fill:none;stroke:var(--foot);stroke-width:1.8}
+.askq{display:flex;flex-direction:column;gap:1px;min-width:0}.askq b{font-size:14px}
+.askbtns{display:flex;gap:6px}.askbtns button{padding:8px 14px}
+.ftimes{display:flex;flex-direction:column;gap:6px}
+.ftr{display:grid;grid-template-columns:62px minmax(104px,1fr) auto 64px auto;gap:6px;align-items:center;font-size:13px}
+.ftr input{padding:6px 8px;font-size:15px}
+.mic{width:96px;height:96px;border-radius:50%;border:0;padding:0;background:var(--hero);display:grid;place-items:center;box-shadow:0 14px 30px -10px rgba(255,77,125,.6)}
+.mic svg{width:42px;height:42px;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round}
+.mic.on{animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(255,77,125,.5)}50%{box-shadow:0 0 0 18px rgba(255,77,125,0)}}
+.vres{width:100%;background:var(--surface-2);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:4px}
+.addbtn:disabled,.primary:disabled{opacity:.45}
 </style>
 </head>
 <body>

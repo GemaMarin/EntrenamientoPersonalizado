@@ -480,13 +480,144 @@ function footPrefsCard(){
   const p = footPrefs();
   return `<div class="card"><div class="row between"><h2>Tu fútbol</h2></div>
     <p class="small">Toca cada día para cambiarlo entre <b>nada</b>, <b>entreno</b> y <b>partido</b>. El entrenador de «Hoy» lo usa para organizar el resto de la semana.</p>
+    ${footTimesCard()}
     <div class="daypick">${DIAS.map((d,i)=>{ const r = p.partido.includes(i) ? "partido" : p.entreno.includes(i) ? "entreno" : ""; return `<button type="button" data-footday="${i}" class="${r}"><b>${d}</b><small>${r||"—"}</small></button>`; }).join("")}</div></div>`;
 }
 function cycleFootDay(i){
   const p = footPrefs(), role = p.partido.includes(i) ? "partido" : p.entreno.includes(i) ? "entreno" : "";
   p.entreno = p.entreno.filter(x=>x!==i); p.partido = p.partido.filter(x=>x!==i);
   if(role==="") p.entreno.push(i); else if(role==="entreno") p.partido.push(i);
-  upsertRec("pref-futbol", {tipo:"pref", fecha:today(), entreno:p.entreno.sort().join(","), partido:p.partido.sort().join(",")});
+  upsertRec("pref-futbol", {tipo:"pref", fecha:today(), entreno:p.entreno.sort().join(","), partido:p.partido.sort().join(",")});   // upsert conserva los horarios
+}
+
+/* =========================================================
+   FÚTBOL: horarios, pregunta tras el entreno y relleno de temporada
+   ========================================================= */
+function footTimes(){
+  const r = logs().find(l=>l.tipo==="pref" && l.id==="pref-futbol") || {};
+  return {entreno:{h:r.hEntreno||"21:00", d:+r.dEntreno||75}, partido:{h:r.hPartido||"11:00", d:+r.dPartido||90}};
+}
+function footPending(){
+  const p = footPrefs(), T = footTimes(), now = new Date(), out = [];
+  for(let i=0;i<7;i++){
+    const d = addDays(parseISO(today()), -i), role = footRole(dow(d)); if(!role) continue;
+    const f = iso(d); if(logs().some(l=>(l.tipo==="futbol" || l.tipo==="futskip") && l.fecha===f)) continue;
+    if(i===0){ const [h,m] = T[role].h.split(":").map(Number), end = new Date(d); end.setHours(h||0, (m||0) + T[role].d); if(now < end) continue; }
+    out.push({fecha:f, role, d});
+  }
+  return out;
+}
+function footAsk(){
+  const pend = footPending(); if(!pend.length) return "";
+  const T = footTimes();
+  return `<div class="ask">${pend.slice(0,3).map(x=>`<div class="askrow">
+    <span class="askico">${QI.foot}</span>
+    <div class="askq"><b>¿Fuiste al ${x.role==="partido"?"partido":"entreno"} de fútbol${x.fecha===today()?" de hoy":` del ${DIAS[dow(x.d)]} ${x.d.getDate()}`}?</b><span class="small muted">${T[x.role].h} · ${T[x.role].d} min</span></div>
+    <div class="askbtns"><button class="ghost" data-fask="no" data-f="${x.fecha}" data-r="${x.role}">No</button><button class="addbtn foot" data-fask="si" data-f="${x.fecha}" data-r="${x.role}">Sí</button></div>
+  </div>`).join("")}</div>`;
+}
+function answerFoot(yes, fecha, role){
+  if(yes){ const T = footTimes(); addRec({tipo:"futbol", fecha, formato:role, minutos:String(T[role].d), rpe:"7", origen:"auto"}); toast("Apuntado. Añade goles o esfuerzo en Fútbol"); }
+  else { upsertRec("skip-"+fecha, {tipo:"futskip", fecha}); toast("Anotado: ese día no fuiste"); }
+  haptic(); render();
+}
+function fillPlan(desde, hasta, inclE, inclP){
+  const p = footPrefs(), have = new Set(logs().filter(l=>l.tipo==="futbol" || l.tipo==="futskip").map(l=>l.fecha)), out = [];
+  for(let d = parseISO(desde); iso(d) <= hasta; d = addDays(d,1)){
+    const di = dow(d), role = p.partido.includes(di) ? "partido" : p.entreno.includes(di) ? "entreno" : null;
+    if(!role || (role==="entreno" && !inclE) || (role==="partido" && !inclP) || have.has(iso(d))) continue;
+    out.push({fecha:iso(d), role});
+  }
+  return out;
+}
+function futFillSheet(){
+  const y = iso(addDays(new Date(), -1)), desde = S.fillFrom || "2026-09-07", T = footTimes();
+  const n = fillPlan(desde, y, S.fillE!==false, !!S.fillP);
+  return ["Rellenar temporada", `<div class="stack" style="gap:12px">
+    <p class="small">Crea de golpe las sesiones de tus días de fútbol que no tengas apuntadas. Luego puedes editar cualquiera (goles, minutos, esfuerzo) o borrar los días que no fuiste.</p>
+    <div class="grid2">${field("ff_from","Desde",`<input id="ff_from" type="date" value="${desde}" max="${y}">`)}<label>Hasta<input type="date" value="${y}" disabled></label></div>
+    <label class="chk" for="ff_e"><input id="ff_e" type="checkbox" ${S.fillE!==false?"checked":""}> Entrenos (${footPrefs().entreno.map(i=>DIAS[i]).join(", ")||"ninguno"} · ${T.entreno.d} min)</label>
+    <label class="chk" for="ff_p"><input id="ff_p" type="checkbox" ${S.fillP?"checked":""}> Partidos (${footPrefs().partido.map(i=>DIAS[i]).join(", ")||"ninguno"} · ${T.partido.d} min)</label>
+    <div class="hxsum"><span class="eyebrow">Se crearán</span><span class="num huge2">${n.length}</span><span class="small muted">${n.length?`${n.filter(x=>x.role==="entreno").length} entrenos y ${n.filter(x=>x.role==="partido").length} partidos, con esfuerzo 7/10`:"Nada pendiente en esas fechas"}</span></div>
+    <button class="primary big" data-act="dofill" ${n.length?"":"disabled"}>Crear ${n.length} sesiones</button>
+  </div>`];
+}
+function footTimesCard(){
+  const T = footTimes();
+  return `<div class="ftimes">${[["entreno","Entreno"],["partido","Partido"]].map(([k,l])=>`<div class="ftr"><b>${l}</b><input type="time" data-ftime="${k}" value="${T[k].h}" aria-label="Hora del ${l.toLowerCase()}"><span class="small muted">dura</span><input type="number" min="15" max="180" data-fdur="${k}" value="${T[k].d}" aria-label="Duración del ${l.toLowerCase()} en minutos"><span class="small muted">min</span></div>`).join("")}</div>`;
+}
+
+/* =========================================================
+   DICTAR POR VOZ → formulario relleno
+   ========================================================= */
+const NUMW = {cero:0,un:1,uno:1,una:1,dos:2,tres:3,cuatro:4,cinco:5,seis:6,siete:7,ocho:8,nueve:9,diez:10,once:11,doce:12,trece:13,catorce:14,quince:15,dieciseis:16,diecisiete:17,dieciocho:18,diecinueve:19,veinte:20,veintiun:21,veintiuno:21,veintidos:22,veintitres:23,veinticuatro:24,veinticinco:25,veintiseis:26,veintisiete:27,veintiocho:28,veintinueve:29,treinta:30,cuarenta:40,cincuenta:50,sesenta:60,setenta:70,ochenta:80,noventa:90,cien:100,ciento:100};
+function wordsToNums(t){
+  t = t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  t = t.replace(/\b(treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa) y (uno|un|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve)\b/g, (_,a,b)=>String(NUMW[a]+NUMW[b]));
+  t = t.replace(/\b(cero|uno|una|un|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|dieciseis|diecisiete|dieciocho|diecinueve|veinte|veintiuno|veintiun|veintidos|veintitres|veinticuatro|veinticinco|veintiseis|veintisiete|veintiocho|veintinueve|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa|cien)\b/g, w=>String(NUMW[w]));
+  return t.replace(/(\d+) coma (\d+)/g, "$1.$2").replace(/(\d+) y medio/g, (_,a)=>a+".5");
+}
+function voiceDate(t){
+  if(/\bayer\b/.test(t)) return iso(addDays(new Date(), -1));
+  if(/\banteayer\b/.test(t)) return iso(addDays(new Date(), -2));
+  const m = t.match(/\bel (lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b/);
+  if(m){ const di = ["lunes","martes","miercoles","jueves","viernes","sabado","domingo"].indexOf(m[1]); let d = new Date(); for(let i=0;i<7;i++){ if(dow(d)===di) return iso(d); d = addDays(d,-1); } }
+  return today();
+}
+function parseVoice(raw){
+  const t = wordsToNums(raw), fecha = voiceDate(t), mm = re => { const m = t.match(re); return m ? m[1] : ""; };
+  const durMin = () => { if(/hora y cuarto/.test(t)) return "75"; if(/hora y media/.test(t)) return "90"; if(/\b2 horas\b/.test(t)) return "120"; if(/\b1 hora\b|una hora/.test(t)) return "60"; return mm(/(\d+)\s*min/); };
+  if(/futbol|partido|pachanga|\bgol(es)?\b/.test(t)){
+    const fmt = /pachanga/.test(t) ? "pachanga" : /entreno|entrenamiento/.test(t) && !/partido/.test(t) ? "entreno" : "partido";
+    const g = /(ningun|sin|0) gol/.test(t) ? "0" : (mm(/(\d+)\s*gol/) || (/\bun gol\b|1 gol|meti gol|marque/.test(t) ? "1" : ""));
+    return {kind:"futbol", label:"Fútbol", p:{fecha, formato:fmt, minutos:durMin() || (fmt==="entreno"?"75":"60"), goles:g, asistencias:mm(/(\d+)\s*asist/), rpe: mm(/esfuerzo (?:de )?(\d+)/) || mm(/(\d+) sobre 10/) || "7", notas: raw.trim()}};
+  }
+  if(/\bmarca\b|\brm\b|record|personal/.test(t)){
+    const v = mm(/(\d+(?:\.\d+)?)\s*(?:kilos|kg|kilogramos|repeticiones|reps|centimetros|cm|calorias|cal|metros|m)\b/) || mm(/(\d+(?:\.\d+)?)/);
+    const un = /centimetro|cm\b/.test(t) ? "cm" : /repeticion|reps/.test(t) ? "reps" : /calorias|\bcal\b/.test(t) ? "cal" : /metros/.test(t) ? "m" : "kg";
+    const ES = [["peso muerto rumano","romanian deadlift"],["peso muerto sumo","sumo deadlift"],["peso muerto","deadlift"],["sentadilla trasera","back squat"],["sentadilla frontal","front squat"],["sentadilla overhead","overhead squat"],["press banca","bench press"],["press de banca","bench press"],["press militar","strict press"],["press de hombro","shoulder press"],["arrancada","snatch"],["cargada","clean"],["dos tiempos","clean and jerk"],["envion","jerk"],["zancadas","lunges"]];
+    let te = t; ES.forEach(([a,b])=>{ te = te.replace(new RegExp("\\b"+a+"\\b","g"), b); });
+    const lift = matchLift(te), ej = lift ? cap1(lift) : cap1((t.match(/(?:marca|rm|record)(?: personal)? (?:de|en) ([a-z ]+?)(?: de| con| a)? \d/)||[])[1]||"");
+    return {kind:"marca", label:"Marca", p:{fecha, ejercicio:ej, valor:v, unidad:un, nota:raw.trim()}};
+  }
+  // WOD por defecto
+  const fmt = /amrap/.test(t) ? "AMRAP" : /emom/.test(t) ? "EMOM" : /for time|por tiempo/.test(t) ? "For time" : /hyrox|hybrid|hibrido/.test(t) ? "Hyrox / Hybrid" : /fuerza|rm\b/.test(t) ? "Fuerza" : "Otro";
+  const mins = mm(/(?:amrap|emom)(?: de)? (\d+)/);
+  let res = "";
+  const rr = t.match(/(\d+)\s*rondas?(?:\s*(?:y|mas|\+)\s*(\d+)\s*(?:repeticiones|reps))?/);
+  if(rr) res = rr[2] ? `${rr[1]}R + ${rr[2]} REPS` : `${rr[1]} RONDAS`;
+  const tm = t.match(/(?:en|tiempo de|hice|tarde)\s*(\d{1,2})\s*minutos?\s*(?:y\s*)?(\d{1,2})\s*segundos?/) || t.match(/\b(\d{1,2}):(\d{2})\b/);
+  if(!res && tm) res = `${tm[1]}:${String(tm[2]).padStart(2,"0")}`;
+  const loads = [...t.matchAll(/([a-z][a-z ]{2,30}?)\s*(?:con|a|de)?\s*(\d+(?:\.\d+)?)\s*(?:kilos|kg|kilogramos)\b/g)].map(m=>`${cap1(m[1].replace(/^(y|con|el|la|los|las|de|he hecho|hice) /,"").trim())} ${m[2]} kg`);
+  const nombre = fmt==="AMRAP" && mins ? `AMRAP ${mins}′` : fmt==="EMOM" && mins ? `EMOM ${mins}′` : fmt==="Hyrox / Hybrid" ? "Hybrid" : "WOD del día";
+  return {kind:"wod", label:"WOD", p:{fecha, formato:fmt, nombre, resultado:res, notas:loads.join(" · "), texto:raw.trim()}};
+}
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null;
+function voiceSheet(){
+  const v = S.voice || {text:"", on:false};
+  const pv = v.text ? parseVoice(v.text) : null;
+  const sum = pv ? (pv.kind==="futbol" ? `${FMT[pv.p.formato]} · ${pv.p.minutos} min${pv.p.goles?` · ${pv.p.goles} gol${+pv.p.goles===1?"":"es"}`:""} · esfuerzo ${pv.p.rpe}`
+    : pv.kind==="marca" ? `${pv.p.ejercicio||"¿ejercicio?"} · ${pv.p.valor||"?"} ${pv.p.unidad}` : `${pv.p.nombre}${pv.p.resultado?` · ${pv.p.resultado}`:""}${pv.p.notas?` · ${pv.p.notas}`:""}`) : "";
+  return ["Dictar", `<div class="stack" style="gap:14px;align-items:center">
+    ${SR ? `<button class="mic ${v.on?"on":""}" data-act="mic" aria-label="${v.on?"Parar":"Hablar"}"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+      <p class="small muted" style="text-align:center">${v.on?"Te escucho… pulsa para terminar":"Pulsa y cuéntame tu entreno"}</p>` : `<p class="small" style="text-align:center">Pulsa el micrófono del teclado del móvil y dicta en el cuadro.</p>`}
+    <textarea id="vtext" placeholder="«Partido de fútbol, 70 minutos, metí 2 goles, esfuerzo 8»&#10;«AMRAP de 14 minutos, 3 rondas y 18 repeticiones, back squat con 45 kilos»&#10;«Nueva marca en peso muerto de 60 kilos»" style="width:100%;min-height:96px">${esc(v.text)}</textarea>
+    ${pv?`<div class="vres"><span class="eyebrow">He entendido · ${pv.label}</span><b>${esc(sum)}</b><span class="small muted">${fDate(parseISO(pv.p.fecha))}</span></div>
+      <button class="primary big" data-act="vuse" style="width:100%">Revisar y guardar</button>`:`<button class="ghost" data-act="vparse">Interpretar</button>`}
+  </div>`];
+}
+function micToggle(){
+  if(!SR) return;
+  if(rec){ try{ rec.stop(); }catch(e){} return; }
+  S.voice = {text:"", on:true}; renderSheet();
+  rec = new SR(); rec.lang = "es-ES"; rec.interimResults = true; rec.continuous = true;
+  let fin = "";
+  rec.onresult = e => { let tmp = ""; for(let i=e.resultIndex;i<e.results.length;i++){ if(e.results[i].isFinal) fin += e.results[i][0].transcript+" "; else tmp += e.results[i][0].transcript; }
+    S.voice.text = (fin+tmp).trim(); const ta = document.getElementById("vtext"); if(ta) ta.value = S.voice.text; };
+  rec.onerror = e => { toast(e.error==="not-allowed" ? "Permite el micrófono para dictar, o usa el del teclado" : "No te he oído bien, prueba otra vez"); };
+  rec.onend = () => { rec = null; S.voice.on = false; S.voice.text = (fin || S.voice.text).trim(); renderSheet(); };
+  try{ rec.start(); haptic(); }catch(e){ rec = null; S.voice.on = false; renderSheet(); }
 }
 
 /* =========================================================
@@ -546,7 +677,8 @@ function vFutbol(){
     </div>
     <div class="hero-stats"><div><b>${fMin(mins)}</b><span>jugados</span></div><div><b>${P.length?(goals/P.length).toFixed(2).replace(".",","):"–"}</b><span>goles / partido</span></div><div><b>${rpe?rpe.toFixed(1).replace(".",","):"–"}</b><span>esfuerzo medio</span></div></div>
   </div>
-  <button class="addbtn foot wide" data-sheet="futbol">+ Registrar fútbol</button>
+  ${footAsk()}
+  <div class="row" style="gap:10px;flex-wrap:nowrap"><button class="addbtn foot wide" data-sheet="futbol" style="flex:1">+ Registrar</button><button class="addbtn soft wide" data-sheet="futfill" style="flex:1">Rellenar temporada</button></div>
   ${footPrefsCard()}
   ${all.length?`<div class="card"><div class="row between"><h2>Tus sesiones</h2><span class="small muted">${all.length}</span></div>
     <div class="wodlist">${all.slice(0, S.futAll?200:8).map(futCard).join("")}</div>
@@ -891,6 +1023,7 @@ function vResumen(){
   const cats = ["run","box","walk","futbol","otro"].filter(c=>w.some(x=>x[c]>0));
   return `
   ${stravaBanner()}
+  ${footAsk()}
   ${todayCard()}
   ${bento(ss)}
   ${sinceRun!=null && sinceRun>=14 ? `<div class="banner info">Llevas <b>${sinceRun} días</b> sin correr. Vuelve con una salida suave de 30–40 min.</div>` : ""}
@@ -909,6 +1042,7 @@ function vResumen(){
 function quickSheet(){
   const A = (attr, ico, t, s, col) => `<${attr.startsWith("for=")?"label":"button"} class="act" ${attr}><span class="ico" style="background:${col}">${ico}</span><span><b>${t}</b><small>${s}</small></span></${attr.startsWith("for=")?"label":"button"}>`;
   return ["¿Qué quieres añadir?", `<div class="actlist">
+    ${A('data-sheet="voice"', '<svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>', "Dictar por voz", "Cuéntalo y lo apunto: WOD, fútbol o marca", "#111827")}
     ${A('for="ocrFile"', ICON.cam, "Leer captura de WOD", "Una captura de AimHarder o foto de la pizarra", "var(--box)")}
     ${A('data-sheet="wod"', ICON.pen, "Apuntar WOD a mano", "Escribe el entreno y tu resultado", "var(--box)")}
     ${A('data-sheet="futbol"', QI.foot.replace('<svg','<svg style="stroke:#fff"'), "Fútbol", "Partido, entreno o pachanga", "var(--foot)")}
@@ -1610,10 +1744,10 @@ function fmWod(p={}){ return `<form data-form="wod">
 function fmMarca(p={}){ return `<form data-form="marca">
   ${field("m_ej","Ejercicio",`<input id="m_ej" name="ejercicio" list="ejercicios" value="${val(p.ejercicio)}" placeholder="Back squat" required>`)}
   <datalist id="ejercicios">${LIFT_DICT.map(x=>`<option value="${cap1(x)}">`).join("")}${["Pull-ups máx","Toes to bar máx","Fran","Cindy","Grace","Wall balls 2 min","Remo 500 m","Remo 2 km","SkiErg 1 km","High Box Jump"].map(x=>`<option value="${x}">`).join("")}</datalist>
-  <div class="grid2">${field("m_val","Valor",`<input id="m_val" name="valor" inputmode="decimal" placeholder="60 · 7:45 · 12" required>`)}
+  <div class="grid2">${field("m_val","Valor",`<input id="m_val" name="valor" inputmode="decimal" value="${val(p.valor)}" placeholder="60 · 7:45 · 12" required>`)}
   ${field("m_un","Unidad",`<select id="m_un" name="unidad">${opt(["kg","reps","tiempo","rondas","m","cm","cal"], p.unidad)}</select>`)}</div>
-  <div class="grid2">${field("m_fecha","Fecha",`<input id="m_fecha" name="fecha" type="date" value="${today()}" required>`)}
-  ${field("m_nota","Nota",`<input id="m_nota" name="nota" placeholder="1RM real · 3×42">`)}</div>
+  <div class="grid2">${field("m_fecha","Fecha",`<input id="m_fecha" name="fecha" type="date" value="${val(p.fecha||today())}" required>`)}
+  ${field("m_nota","Nota",`<input id="m_nota" name="nota" value="${val(p.nota)}" placeholder="1RM real · 3×42">`)}</div>
   <button class="primary big" type="submit">Guardar marca</button></form>`; }
 function fmEvento(){ return `<form data-form="evento">
   ${field("e_n","Nombre",`<input id="e_n" name="nombre" placeholder="Medio Maratón de Madrid" required>`)}
@@ -1763,6 +1897,8 @@ const SHEETS = {
   pr: () => ["Marca oficial", fmPR()],
   run: id => runSheet(id),
   quick: () => quickSheet(),
+  voice: () => voiceSheet(),
+  futfill: () => futFillSheet(),
   futbol: p => ["Fútbol", fmFutbol(p||{})],
   futDetail: id => futSheet(id),
   hyrox: () => hyroxSheet(),
@@ -1801,6 +1937,7 @@ function openSheet(kind, data){
 }
 function closeSheet(){
   const el = $("#sheet"); if(el.hidden) return;
+  if(rec){ try{ rec.abort(); }catch(e){} rec = null; } S.voice = null;
   el.classList.remove("open"); document.body.classList.remove("noscroll");
   setTimeout(()=>{ if(runMap){ try{ runMap.remove(); }catch(e){} runMap = null; } el.hidden = true; $("#sheetBody").innerHTML = ""; S.sheetState = null; S.confirmDel = null; }, 260);
 }
@@ -2086,6 +2223,8 @@ document.addEventListener("click", async e=>{
   if(hs){ const g = document.getElementById("hm_goal"); if(g) S.hmGoal = parseTime(g.value) || S.hmGoal; S.hmStrat = hs.dataset.hmstrat; renderSheet(); return; }
   const sh = e.target.closest("[data-sheet]");
   if(sh){ const k = sh.dataset.sheet; openSheet(k, k==="marca" && sh.dataset.ej ? {ejercicio:sh.dataset.ej, unidad:sh.dataset.un} : k==="futbol" ? {formato: sh.dataset.fmt || footRole(dow(new Date())) || "partido"} : null); return; }
+  const fa = e.target.closest("[data-fask]");
+  if(fa){ answerFoot(fa.dataset.fask==="si", fa.dataset.f, fa.dataset.r); return; }
   const th = e.target.closest("[data-theme-set]");
   if(th){ LS.set("theme", th.dataset.themeSet); applyTheme(); haptic(); render(); return; }
   const fu = e.target.closest("[data-fut]");
@@ -2121,6 +2260,12 @@ document.addEventListener("click", async e=>{
     fetchDetails().then(()=>{ S.recalc = false; render(); toast(S.err.det || "Marcas recalculadas"); delete S.err.det; }); return; }
   if(act==="futall"){ S.futAll = !S.futAll; render(); return; }
   if(act==="close"){ closeSheet(); return; }
+  if(act==="mic"){ micToggle(); return; }
+  if(act==="vparse"){ S.voice = {text: document.getElementById("vtext")?.value || "", on:false}; renderSheet(); return; }
+  if(act==="vuse"){ const txt = document.getElementById("vtext")?.value || S.voice?.text || ""; const pv = parseVoice(txt); S.voice = null; haptic(); openSheet(pv.kind, pv.p); return; }
+  if(act==="dofill"){ const y = iso(addDays(new Date(), -1)), T = footTimes(), list = fillPlan(S.fillFrom || "2026-09-07", y, S.fillE!==false, !!S.fillP);
+    list.forEach(x=>addRec({tipo:"futbol", fecha:x.fecha, formato:x.role, minutos:String(T[x.role].d), rpe:"7", origen:"relleno"}, true));
+    LS.set("recs", S.recs); schedulePush(); haptic(); toast(`${list.length} sesiones de fútbol creadas`); closeSheet(); render(); return; }
   if(act==="back"){ if(history.length>1) history.back(); else location.hash = "resumen"; return; }
   if(act==="onbnext"){ S.onbI = (S.onbI||0)+1; if(S.onbI>=ONB.length){ LS.set("onb", true); location.hash = "ajustes"; } render(); return; }
   if(act==="onbskip"){ LS.set("onb", true); render(); return; }
@@ -2142,6 +2287,12 @@ document.addEventListener("change", async e=>{
   if(e.target.id==="ocrFile" && e.target.files[0]){ const f = e.target.files[0]; e.target.value = ""; closeSheet(); ocrRead(f, false); return; }
   if(e.target.id==="bulkFiles" && e.target.files.length){ const fs = [...e.target.files]; e.target.value = ""; closeSheet(); if(location.hash!=="#box") location.hash = "box"; bulkImport(fs); return; }
   if(e.target.id==="calc_ex"){ S.calcEx = e.target.value; render(); return; }
+  if(e.target.id==="ff_from"){ S.fillFrom = e.target.value; renderSheet(); return; }
+  if(e.target.id==="ff_e"){ S.fillE = e.target.checked; renderSheet(); return; }
+  if(e.target.id==="ff_p"){ S.fillP = e.target.checked; renderSheet(); return; }
+  if(e.target.dataset.ftime || e.target.dataset.fdur){ const k = e.target.dataset.ftime || e.target.dataset.fdur, p = footPrefs(), T = footTimes();
+    if(e.target.dataset.ftime) T[k].h = e.target.value; else T[k].d = Math.max(15, Math.min(180, +e.target.value||T[k].d));
+    upsertRec("pref-futbol", {tipo:"pref", fecha:today(), entreno:p.entreno.join(","), partido:p.partido.join(","), hEntreno:T.entreno.h, dEntreno:String(T.entreno.d), hPartido:T.partido.h, dPartido:String(T.partido.d)}); toast("Horario guardado"); return; }
   if(e.target.id==="hm_goal"){ const g = parseTime(e.target.value); if(g && g>3600 && g<14400 && g!==S.hmGoal){ S.hmGoal = g; setTimeout(renderSheet, 0); } return; }
   if(e.target.dataset.acc){ const r = S.recs.find(x=>x.id===e.target.dataset.acc); if(r){ r.accHecho = e.target.checked ? "1" : ""; r.mod = Date.now(); LS.set("recs", S.recs); schedulePush(); render(); toast(e.target.checked ? "Accesorios hechos" : "Accesorios sin hacer"); } return; }
   if(e.target.id!=="importFile" || !e.target.files[0]) return;
