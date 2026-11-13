@@ -438,6 +438,38 @@ nav.tabs{background:color-mix(in srgb,var(--surface) 88%,transparent);backdrop-f
 .itembtn{width:100%;text-align:left;background:none;border:0;border-top:1px solid var(--line);border-radius:0;padding:10px 0;color:var(--fg);font-weight:400}
 .list .itembtn:first-child{border-top:0}
 nav.tabs a{font-size:10.5px}
+
+/* ---------- correr v2 ---------- */
+.runhero{background:linear-gradient(135deg,#2F5BFF 0%,#3D8BFF 55%,#22B5E8 100%);box-shadow:0 14px 34px -14px rgba(51,102,255,.55)}
+.prgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.prt{position:relative;display:flex;flex-direction:column;gap:2px;padding:12px;border-radius:16px;min-width:0;overflow:hidden;color:var(--fg);background:var(--surface-2)}
+.prt::after{content:"";position:absolute;inset:auto -30% -45% auto;width:110px;height:110px;border-radius:50%;background:var(--pc);opacity:.12}
+.prt.c5{--pc:#22B5E8}.prt.c10{--pc:#3366FF}.prt.c21{--pc:#8B5CF6}
+.prt .dist{font-family:var(--display);font-weight:800;font-size:15px;color:var(--pc);letter-spacing:.04em}
+.prt .medal{width:22px;height:22px;color:var(--pc)} .prt .medal svg{width:100%;height:100%}
+.ptime{font-family:var(--display);font-weight:800;font-size:30px;line-height:1.05;font-variant-numeric:tabular-nums}
+.psub{font-size:11.5px;color:var(--muted)}
+.psrc{font-size:10.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.delta{align-self:flex-start;font-size:11px;font-weight:700;color:var(--ok);background:color-mix(in srgb,var(--ok) 14%,transparent);padding:1px 7px;border-radius:999px;margin:2px 0}
+.ptime.long{font-size:25px}
+@media (max-width:380px){.ptime{font-size:25px}.ptime.long{font-size:21px}}
+.lvl{display:flex;flex-direction:column;gap:8px}
+.lvr{display:grid;grid-template-columns:58px minmax(0,1fr) 78px 62px;gap:8px;align-items:center}
+.ll{font-size:13px;font-weight:600}
+.lb{height:10px;border-radius:999px;background:var(--surface-2);overflow:hidden}
+.lb i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#22B5E8,#3366FF)}
+.lt{display:flex;flex-direction:column;line-height:1.1}.lt b{font-family:var(--display);font-size:18px}.lt small{font-size:11px;color:var(--muted)}
+.ld{font-size:11.5px;font-weight:700;text-align:right;color:var(--muted)}.ld.up{color:var(--ok)}
+.trend{font-size:13px}.trend b{color:var(--warn)}.trend.up b{color:var(--ok)}
+.zbar{display:flex;height:12px;border-radius:999px;overflow:hidden;gap:2px}.zbar i{flex:1}
+.zlist{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 14px}
+.zr{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:8px;align-items:center;font-size:13px}
+.zd{color:#fff;font:800 12px var(--display);text-align:center;border-radius:6px;padding:2px 0}
+.zn{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.zr b{font-family:var(--display);font-size:15px;font-variant-numeric:tabular-nums}
+@media (max-width:380px){.zlist{grid-template-columns:1fr}}
+.runc{background:var(--surface-2);border:0}
+.rmap{background:var(--surface);box-shadow:inset 0 0 0 1px var(--line)}
 </style>
 </head>
 <body>
