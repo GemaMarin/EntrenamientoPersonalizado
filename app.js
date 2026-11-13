@@ -1880,15 +1880,43 @@ function raceCard(r){
       <div class="row" style="gap:8px"><a class="ghost small rlink" href="${esc(r.u)}" target="_blank" rel="noopener">Ver web</a>${mine?`<span class="pill ok">En tus competiciones</span>`:`<button class="ghost small" data-addrace="${esc(r.f)}|${esc(r.n)}">+ Añadir a mis competiciones</button>`}</div></div>
   </div>`;
 }
+const RCOL = r => r.hx ? "#F08C1A" : r.d.includes(42.2) ? "#E5487F" : r.d.includes(21.1) ? "#8B5CF6" : r.d.includes(15) ? "#14A3A0" : r.d.includes(10) ? "#3366FF" : r.d.includes(5) ? "#22B5E8" : "#8A90A2";
+function raceCal(L){
+  const m0 = S.rmonth ? parseISO(S.rmonth+"-01") : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  const first = new Date(m0.getFullYear(), m0.getMonth(), 1), start = addDays(first, -dow(first)), t = today();
+  const mine = new Set(eventos().map(e=>e.fecha)), byDay = {};
+  L.forEach(r=>{ (byDay[r.f] = byDay[r.f] || []).push(r); });
+  const cells = [];
+  for(let i=0;i<42;i++){ const d = addDays(start,i), k = iso(d), inM = d.getMonth()===m0.getMonth(), rs = byDay[k] || [];
+    if(i>=35 && !inM) break;
+    cells.push(`<button type="button" class="cd2${inM?"":" out"}${k===t?" today":""}${S.rday===k?" sel":""}${rs.length?" has":""}" ${rs.length||mine.has(k)?`data-rday="${k}"`:"disabled"} aria-label="${d.getDate()} ${MESES[d.getMonth()]}${rs.length?`: ${rs.length} carrera${rs.length>1?"s":""}`:""}">
+      <span class="dn">${d.getDate()}</span>${mine.has(k)?`<span class="star" aria-hidden="true">★</span>`:""}
+      <span class="dots">${rs.slice(0,3).map(r=>`<i style="background:${RCOL(r)}"></i>`).join("")}</span></button>`); }
+  const monthL = L.filter(r=>r.f.slice(0,7)===iso(first).slice(0,7));
+  const shown = S.rday ? L.filter(r=>r.f===S.rday) : monthL;
+  const name = first.toLocaleDateString("es-ES", {month:"long", year:"numeric"});
+  return `<div class="rcal ${S.rdir||""}">
+      <div class="calhead"><button type="button" class="iconbtn" data-rmon="-1" aria-label="Mes anterior">‹</button><b>${name.charAt(0).toUpperCase()+name.slice(1)}</b><button type="button" class="iconbtn" data-rmon="1" aria-label="Mes siguiente">›</button></div>
+      <div class="calgrid">${["L","M","X","J","V","S","D"].map(x=>`<span class="wd">${x}</span>`).join("")}${cells.join("")}</div>
+    </div>
+    <div class="legend">${[["5K","#22B5E8"],["10K","#3366FF"],["15K","#14A3A0"],["Media","#8B5CF6"],["Maratón","#E5487F"],["HYROX","#F08C1A"]].map(([l,c])=>`<span><i class="dot" style="background:${c}"></i>${l}</span>`).join("")}<span><b style="color:var(--warn)">★</b> tus competiciones</span></div>
+    <div class="row between"><span class="eyebrow">${S.rday ? `${DIAS[dow(parseISO(S.rday))]} ${fDate(parseISO(S.rday))}` : `${monthL.length} carrera${monthL.length===1?"":"s"} este mes`}</span>${S.rday?`<button class="linkbtn" data-rday="">Ver todo el mes</button>`:""}</div>
+    <div class="stack rlist" style="gap:8px">${shown.map(raceCard).join("") || `<p class="small muted">${S.rday?"Ese día solo hay una competición tuya.":"No hay carreras este mes con ese filtro."}</p>`}</div>`;
+}
 function racesSheet(){
-  const L = raceList(), f = S.rf || "all";
+  const L = raceList(), f = S.rf || "all", v = S.rview || "list";
   return ["Carreras en Madrid", `<div class="stack" style="gap:12px">
+    <div class="vtoggle" role="tablist"><button type="button" role="tab" data-rview="list" aria-selected="${v==="list"}">Lista</button><button type="button" role="tab" data-rview="cal" aria-selected="${v==="cal"}">Calendario</button><i class="vind ${v}"></i></div>
     <input id="rq" type="search" placeholder="Buscar por nombre o zona" value="${esc(S.rq||"")}">
-    <div class="chiprow">${DFIL.map(([v,l])=>`<button type="button" data-rf="${v}" aria-pressed="${f===v}">${l}</button>`).join("")}</div>
-    <span class="small muted">${L.length} carrera${L.length===1?"":"s"} próximas</span>
-    <div class="stack" style="gap:8px">${L.map(raceCard).join("") || `<p class="small muted">No hay carreras con ese filtro.</p>`}</div>
+    <div class="chiprow">${DFIL.map(([x,l])=>`<button type="button" data-rf="${x}" aria-pressed="${f===x}">${l}</button>`).join("")}</div>
+    ${v==="cal" ? raceCal(L) : `<span class="small muted">${L.length} carrera${L.length===1?"":"s"} próximas</span>
+    <div class="stack rlist" style="gap:8px">${L.map(raceCard).join("") || `<p class="small muted">No hay carreras con ese filtro.</p>`}</div>`}
     <div class="note" style="display:block">Lista recopilada el 13 nov 2026 de calendarios públicos y webs oficiales. Las marcadas «Por confirmar» pueden cambiar: comprueba siempre en la web. Más carreras en ${RMORE.map(([n,u])=>`<a href="${u}" target="_blank" rel="noopener">${n}</a>`).join(", ")}.</div>
   </div>`];
+}
+function moveMonth(n){
+  const m0 = S.rmonth ? parseISO(S.rmonth+"-01") : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  const m = new Date(m0.getFullYear(), m0.getMonth()+n, 1); S.rmonth = iso(m).slice(0,7); S.rday = null; S.rdir = n>0 ? "slide-l" : "slide-r"; haptic(); renderSheet(); S.rdir = "";
 }
 function racesCard(){
   const next = RACES.filter(r=>r.f>=today()).slice(0,3);
@@ -2317,6 +2345,12 @@ document.addEventListener("click", async e=>{
   if(hs){ const g = document.getElementById("hm_goal"); if(g) S.hmGoal = parseTime(g.value) || S.hmGoal; S.hmStrat = hs.dataset.hmstrat; renderSheet(); return; }
   const sh = e.target.closest("[data-sheet]");
   if(sh){ const k = sh.dataset.sheet; openSheet(k, k==="marca" && sh.dataset.ej ? {ejercicio:sh.dataset.ej, unidad:sh.dataset.un} : k==="futbol" ? {formato: sh.dataset.fmt || footRole(dow(new Date())) || "partido"} : null); return; }
+  const rv = e.target.closest("[data-rview]");
+  if(rv){ S.rview = rv.dataset.rview; S.rday = null; S.rdir = ""; haptic(); renderSheet(); return; }
+  const rmo = e.target.closest("[data-rmon]");
+  if(rmo){ moveMonth(+rmo.dataset.rmon); return; }
+  const rdy = e.target.closest("[data-rday]");
+  if(rdy){ S.rday = rdy.dataset.rday || null; S.rdir = ""; haptic(); renderSheet(); return; }
   const rf = e.target.closest("[data-rf]");
   if(rf){ S.rf = rf.dataset.rf; renderSheet(); return; }
   const ar = e.target.closest("[data-addrace]");
@@ -2433,9 +2467,13 @@ document.addEventListener("touchend", ()=>{ if(pY==null) return; const ptr = $("
   else { ptr.style.opacity = 0; ptr.style.transform = "translate(-50%,0)"; } pD = 0; }, {passive:true});
 // Arrastrar el panel hacia abajo para cerrarlo
 let sY = null, sD = 0;
-document.addEventListener("touchstart", e=>{ const p = e.target.closest(".sheet-panel"); sY = p && p.scrollTop<=0 && !e.target.closest("input,textarea,select,.leaflet-container,input[type=range]") ? e.touches[0].clientY : null; sD = 0; }, {passive:true});
+document.addEventListener("touchstart", e=>{ const p = e.target.closest(".sheet-panel"); sY = p && p.scrollTop<=0 && !e.target.closest("input,textarea,select,.leaflet-container,input[type=range],.calgrid,.chiprow") ? e.touches[0].clientY : null; sD = 0; }, {passive:true});
 document.addEventListener("touchmove", e=>{ if(sY==null) return; sD = Math.max(0, e.touches[0].clientY - sY); const p = $(".sheet-panel"); p.style.transition = "none"; p.style.transform = `translateY(${sD}px)`; }, {passive:true});
 document.addEventListener("touchend", ()=>{ if(sY==null) return; const p = $(".sheet-panel"); p.style.transition = ""; p.style.transform = ""; if(sD > 110) closeSheet(); sY = null; sD = 0; }, {passive:true});
+// Deslizar el calendario de carreras para cambiar de mes
+let cX = null, cY = null;
+document.addEventListener("touchstart", e=>{ const c = e.target.closest(".calgrid"); cX = c ? e.touches[0].clientX : null; cY = c ? e.touches[0].clientY : null; }, {passive:true});
+document.addEventListener("touchend", e=>{ if(cX==null) return; const t = e.changedTouches[0], dx = t.clientX - cX, dy = t.clientY - cY; cX = null; if(Math.abs(dx) > 50 && Math.abs(dy) < 40) moveMonth(dx<0 ? 1 : -1); }, {passive:true});
 // Cabecera compacta al hacer scroll
 window.addEventListener("scroll", ()=>{ document.body.classList.toggle("scrolled", window.scrollY > 56); }, {passive:true});
 document.addEventListener("keydown", e=>{ if(e.key==="Escape") closeSheet(); if((e.key==="Enter"||e.key===" ") && e.target.matches("[data-mus]")){ e.preventDefault(); e.target.click(); } });
