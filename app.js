@@ -26,7 +26,7 @@ const S = {
 };
 const saveCfg = () => LS.set("cfg", S.cfg);
 
-const VIEWS = ["resumen","correr","box","objetivos","plan","ajustes"];
+const VIEWS = ["resumen","correr","box","futbol","objetivos","plan","ajustes"];
 const COL = {run:"var(--run)",box:"var(--box)",futbol:"var(--foot)",walk:"var(--walk)",otro:"var(--other)"};
 const NAME = {run:"Carrera",box:"Box / HIIT",futbol:"Fútbol",walk:"Senderismo",otro:"Otro"};
 const RPE_DEF = {run:6,box:7,futbol:7,walk:3,otro:4};
@@ -456,7 +456,7 @@ function sessionItem(s){
            : s.cat==="walk" ? `${s.km.toFixed(1)} km · ${Math.round(s.elev)} m+ · ${fMin(s.min)}`
            : `${fMin(s.min)}${s.kcal? " · "+s.kcal+" kcal":""}`;
   const hr = s.hr ? ` · ${Math.round(s.hr)} ppm` : "";
-  if(s.src==="log") return `<div class="item"><span class="badge" style="background:${COL[s.cat]}">${tag}</span><div style="min-width:0"><div class="t">${esc(s.name)}</div><div class="s">${DIAS[dow(s.date)]} ${fDate(s.date)} · ${fMin(s.min)} · esfuerzo ${s.rpe}/10${s.goles&&+s.goles?` · ${s.goles} gol${+s.goles>1?"es":""}`:""}</div></div>${delBtn(s.id)}</div>`;
+  if(s.src==="log") return `<button class="item itembtn" data-fut="${s.id}"><span class="badge" style="background:${COL[s.cat]}">${tag}</span><div style="min-width:0"><div class="t">${esc(s.name)}</div><div class="s">${DIAS[dow(s.date)]} ${fDate(s.date)} · ${fMin(s.min)} · esfuerzo ${s.rpe}/10${s.goles&&+s.goles?` · ${s.goles} gol${+s.goles>1?"es":""}`:""}</div></div><span></span></button>`;
   return `<a class="item" ${s.cat==="run"?`data-run="${s.id}" href="#correr"`:`href="https://www.strava.com/activities/${s.id}" target="_blank" rel="noopener"`} style="text-decoration:none;color:inherit"><span class="badge" style="background:${COL[s.cat]}">${tag}</span><div style="min-width:0"><div class="t">${esc(s.name)}</div><div class="s">${DIAS[dow(s.date)]} ${fDate(s.date)} · ${det}${hr}</div></div>${s.prs?`<span class="pill">${s.prs} PR</span>`:"<span></span>"}</a>`;
 }
 function weekStrip(sessions){
@@ -487,15 +487,15 @@ function footPrefs(){
 }
 function footRole(di){ const p = footPrefs(); return p.partido.includes(di) ? "partido" : p.entreno.includes(di) ? "entreno" : null; }
 const FUT = {cuadriceps:.8, isquios:.8, gemelos:.8, gluteos:.6, aductores:.7, abdomen:.3, oblicuos:.2};
-function fmFutbol(p={}){ return `<form data-form="futbol">
+function fmFutbol(p={}){ return `<form data-form="futbol">${p.id?`<input type="hidden" name="id" value="${val(p.id)}">`:""}
   <div class="seg big3" role="group" aria-label="Tipo">${[["partido","Partido"],["entreno","Entreno"],["pachanga","Pachanga"]].map(([v,l])=>`<label class="segopt"><input type="radio" name="formato" value="${v}" ${ (p.formato||"partido")===v ? "checked":""}><span>${l}</span></label>`).join("")}</div>
   <div class="grid2">${field("f_fecha","Fecha",`<input id="f_fecha" name="fecha" type="date" value="${val(p.fecha||today())}" required>`)}
   ${field("f_min","Minutos jugados",`<input id="f_min" name="minutos" type="number" min="1" max="200" value="${val(p.minutos|| (p.formato==="entreno"?75:60))}" required>`)}</div>
   <label for="f_rpe">Esfuerzo <span class="muted" id="f_rpe_v">${p.rpe||7}/10</span><input id="f_rpe" name="rpe" type="range" min="1" max="10" value="${p.rpe||7}" class="rng"></label>
-  <div class="grid2">${field("f_gol","Goles",`<input id="f_gol" name="goles" type="number" min="0" max="20" placeholder="0">`)}
-  ${field("f_asi","Asistencias",`<input id="f_asi" name="asistencias" type="number" min="0" max="20" placeholder="0">`)}</div>
-  ${field("f_notas","Notas",`<input id="f_notas" name="notas" placeholder="Resultado, molestias, sensaciones…">`)}
-  <button class="primary big" type="submit">Guardar</button></form>`; }
+  <div class="grid2">${field("f_gol","Goles",`<input id="f_gol" name="goles" type="number" min="0" max="20" value="${val(p.goles)}" placeholder="0">`)}
+  ${field("f_asi","Asistencias",`<input id="f_asi" name="asistencias" type="number" min="0" max="20" value="${val(p.asistencias)}" placeholder="0">`)}</div>
+  ${field("f_notas","Notas",`<input id="f_notas" name="notas" value="${val(p.notas)}" placeholder="Resultado, molestias, sensaciones…">`)}
+  <button class="primary big" type="submit">${p.id?"Guardar cambios":"Guardar"}</button></form>`; }
 function footPrefsCard(){
   const p = footPrefs();
   return `<div class="card"><div class="row between"><h2>Tu fútbol</h2></div>
@@ -507,6 +507,88 @@ function cycleFootDay(i){
   p.entreno = p.entreno.filter(x=>x!==i); p.partido = p.partido.filter(x=>x!==i);
   if(role==="") p.entreno.push(i); else if(role==="entreno") p.partido.push(i);
   upsertRec("pref-futbol", {tipo:"pref", fecha:today(), entreno:p.entreno.sort().join(","), partido:p.partido.sort().join(",")});
+}
+
+/* =========================================================
+   PESTAÑA FÚTBOL
+   ========================================================= */
+const FMT = {partido:"Partido", entreno:"Entreno", pachanga:"Pachanga"};
+function seasonStart(){ const t = new Date(); return new Date(t.getMonth()>=7 ? t.getFullYear() : t.getFullYear()-1, 7, 1); }  // temporada desde agosto
+function nextFoot(){
+  const p = footPrefs(); if(!p.entreno.length && !p.partido.length) return null;
+  for(let i=0;i<8;i++){ const d = addDays(new Date(), i), r = footRole(dow(d)); if(!r) continue;
+    if(i===0 && logs().some(l=>l.tipo==="futbol" && l.fecha===today())) continue;
+    return {d, r, i}; }
+  return null;
+}
+function futCard(f){
+  const d = parseISO(f.fecha), g = +f.goles||0, a = +f.asistencias||0, isP = f.formato==="partido";
+  return `<button class="futc ${isP?"p":""}" data-fut="${f.id}">
+    <span class="wdate"><b>${d.getDate()}</b><span>${MESES[d.getMonth()]}</span></span>
+    <span class="wbody"><span class="row" style="gap:6px"><span class="ftag ${isP?"p":""}">${FMT[f.formato]||"Fútbol"}</span><span class="small muted">${DIAS[dow(d)]}</span></span>
+      <span class="fline"><b>${esc(f.minutos)}′</b> · esfuerzo ${esc(f.rpe||"–")}/10${g?` · <b>${g}</b> gol${g>1?"es":""}`:""}${a?` · ${a} asist.`:""}</span>
+      ${f.notas?`<span class="com">${esc(f.notas)}</span>`:""}</span>
+    <span class="effort" style="--e:${(+f.rpe||5)*10}%"><i></i></span>
+  </button>`;
+}
+function futWeeks(list){
+  const weeks = 10, start = addDays(monday(new Date()), -7*(weeks-1)), w = Array.from({length:weeks},(_,i)=>({s:addDays(start,7*i), p:0, e:0}));
+  list.forEach(f=>{ const i = Math.floor(daysBetween(start, parseISO(f.fecha))/7); if(i>=0 && i<weeks){ if(f.formato==="partido") w[i].p += +f.minutos||0; else w[i].e += +f.minutos||0; } });
+  const W = 400, H = 150, pl = 30, pb = 22, pt = 8, mx = Math.max(90, ...w.map(x=>x.p+x.e)), top = Math.ceil(mx/60)*60, bw = (W-pl-6)/weeks, y = v => pt + (H-pt-pb)*(1-v/top);
+  let g = "";
+  for(let v=0; v<=top; v+=60) g += `<line x1="${pl}" x2="${W-6}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${pl-5}" y="${y(v)+3}" text-anchor="end">${v/60}h</text>`;
+  w.forEach((x,i)=>{ const X = pl + i*bw + bw*.2, bwid = bw*.6;
+    if(x.e) g += `<rect x="${X}" y="${y(x.e)}" width="${bwid}" height="${y(0)-y(x.e)}" rx="3" fill="var(--foot)" fill-opacity=".45"/>`;
+    if(x.p) g += `<rect x="${X}" y="${y(x.e+x.p)}" width="${bwid}" height="${y(x.e)-y(x.e+x.p)}" rx="3" fill="var(--foot)"/>`;
+    if(i%2===(weeks-1)%2) g += `<text x="${X+bwid/2}" y="${H-6}" text-anchor="middle">${x.s.getDate()} ${MESES[x.s.getMonth()]}</text>`; });
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Minutos de fútbol por semana">${g}</svg>
+  <div class="legend"><span><i class="dot" style="background:var(--foot)"></i>Partido</span><span><i class="dot" style="background:var(--foot);opacity:.45"></i>Entreno</span></div>`;
+}
+function vFutbol(){
+  const all = logs().filter(l=>l.tipo==="futbol").sort((a,b)=>b.fecha.localeCompare(a.fecha));
+  const ss = seasonStart(), season = all.filter(f=>parseISO(f.fecha)>=ss);
+  const P = season.filter(f=>f.formato==="partido"), E = season.filter(f=>f.formato!=="partido");
+  const goals = season.reduce((t,f)=>t+(+f.goles||0),0), ast = season.reduce((t,f)=>t+(+f.asistencias||0),0);
+  const mins = season.reduce((t,f)=>t+(+f.minutos||0),0), rpe = season.length ? season.reduce((t,f)=>t+(+f.rpe||0),0)/season.length : 0;
+  const nf = nextFoot();
+  // Peso del fútbol en tu carga de las últimas 4 semanas
+  const s28 = allSessions().filter(s=>daysBetween(s.date,new Date())<28), lt = s28.reduce((t,s)=>t+load(s),0), lf = s28.filter(s=>s.cat==="futbol").reduce((t,s)=>t+load(s),0);
+  const share = lt ? Math.round(100*lf/lt) : 0;
+  const fv = {}; Object.entries(FUT).forEach(([k,v])=>fv[k]=v/.8);
+  return `
+  <div class="hero foothero">
+    <div class="row between"><span class="eyebrow">Temporada ${ss.getFullYear()}/${String(ss.getFullYear()+1).slice(2)}</span>${nf?`<span class="glass">${nf.i===0?"Hoy":nf.i===1?"Mañana":DIAS[dow(nf.d)]} · ${nf.r}</span>`:""}</div>
+    <div class="fstats">
+      <div><b data-count="${P.length}">${P.length}</b><span>partidos</span></div>
+      <div><b data-count="${E.length}">${E.length}</b><span>entrenos</span></div>
+      <div><b data-count="${goals}">${goals}</b><span>goles</span></div>
+      <div><b data-count="${ast}">${ast}</b><span>asistencias</span></div>
+    </div>
+    <div class="hero-stats"><div><b>${fMin(mins)}</b><span>jugados</span></div><div><b>${P.length?(goals/P.length).toFixed(2).replace(".",","):"–"}</b><span>goles / partido</span></div><div><b>${rpe?rpe.toFixed(1).replace(".",","):"–"}</b><span>esfuerzo medio</span></div></div>
+  </div>
+  <button class="addbtn foot wide" data-sheet="futbol">+ Registrar fútbol</button>
+  ${footPrefsCard()}
+  ${all.length?`<div class="card"><div class="row between"><h2>Tus sesiones</h2><span class="small muted">${all.length}</span></div>
+    <div class="wodlist">${all.slice(0, S.futAll?200:8).map(futCard).join("")}</div>
+    ${all.length>8?`<button class="ghost" data-act="futall" style="align-self:center">${S.futAll?"Ver menos":`Ver las ${all.length}`}</button>`:""}</div>`
+  : `<div class="card"><h2>Tus sesiones</h2><p class="small">Aún no has apuntado fútbol. Pulsa «Registrar fútbol» al terminar cada entreno o partido y aquí verás tu temporada.</p></div>`}
+  <div class="card"><div class="row between"><h3>Minutos por semana</h3><span class="small muted">${share}% de tu carga (4 sem)</span></div>${futWeeks(all)}
+    <p class="note">Carga = minutos × esfuerzo. El fútbol cuenta como entrenamiento de intervalos: sprints, cambios de ritmo y frenadas.</p></div>
+  <div class="card"><h3>Lo que trabaja el fútbol</h3>
+    <div class="bodygrid"><div class="twin" style="grid-column:1/-1"><div><span class="eyebrow">Delante</span>${Body.figure("f", fv, {id:"ff"})}</div><div><span class="eyebrow">Detrás</span>${Body.figure("b", fv, {id:"fb"})}</div></div></div>
+    <p class="small">Isquios, aductores y gemelos son los que más sufren con sprints y frenadas: son también los que necesitas para la media y el HYROX.</p></div>
+  <div class="card"><h3>Cómo encaja con tus objetivos</h3>
+    <div class="list small">
+      <div class="check"><span class="box">1</span><div><b>El partido es tu sesión de intensidad del domingo.</b> No hace falta sumar series el mismo fin de semana.</div></div>
+      <div class="check"><span class="box">2</span><div><b>El lunes tras el partido</b>, si notas las piernas cargadas en el chequeo, toma el entreno con calma.</div></div>
+      <div class="check"><span class="box">3</span><div><b>El sábado</b>, rodaje suave o descanso: llegar fresca al partido también es entrenar.</div></div>
+      <div class="check"><span class="box">4</span><div><b>Isquios y aductores:</b> 2 series de nórdicos o Copenhagen una vez por semana reducen el riesgo de lesión en fútbol y te ayudan en carrera.</div></div>
+    </div>
+    <p class="note">Pautas generales de prevención en deportes de equipo; no sustituyen a tu entrenador ni a tu fisio.</p></div>`;
+}
+function futSheet(id){
+  const f = logs().find(l=>l.id===id && l.tipo==="futbol"); if(!f) return ["Fútbol","<p>Ya no existe.</p>"];
+  return [`${FMT[f.formato]||"Fútbol"} · ${fDate(parseISO(f.fecha))}`, `${fmFutbol(f)}<div class="row between" style="margin-top:12px">${delBtn(f.id, "Borrar")}<button class="ghost" data-act="close">Cerrar</button></div>`];
 }
 
 /* =========================================================
@@ -1586,6 +1668,7 @@ const SHEETS = {
   pr: () => ["Marca oficial", fmPR()],
   run: id => runSheet(id),
   futbol: p => ["Fútbol", fmFutbol(p||{})],
+  futDetail: id => futSheet(id),
   hyrox: () => hyroxSheet(),
   hmplan: () => hmSheet(),
   story: url => ["Tu semana", `<div class="stack" style="gap:10px;align-items:center"><img src="${url}" alt="Resumen de tu semana" class="storyimg"><p class="small muted">Mantén pulsada la imagen para guardarla o compartirla.</p></div>`],
@@ -1773,7 +1856,6 @@ function vPlan(){
 function vAjustes(){
   const conn = !!S.tok;
   return `
-  ${footPrefsCard()}
   <div class="card">
     <div class="row between"><h2>Strava</h2><span class="pill ${conn?"ok":""}">${conn?`<i class="dot" style="background:var(--ok)"></i>Conectado${S.athlete?.firstname?" · "+esc(S.athlete.firstname):""}`:"Sin conectar"}</span></div>
     ${S.err.strava?`<div class="banner bad">${esc(S.err.strava.message||"Error con Strava")}</div>`:""}
@@ -1852,15 +1934,15 @@ function render(){
 function renderNow(){
   const v = current();
   document.querySelectorAll("nav.tabs a").forEach(a=>a.setAttribute("aria-current", a.dataset.v===v?"page":"false"));
-  const titles = {resumen:"Tu semana",correr:"Correr",box:"Box",objetivos:"Objetivos",plan:"Plan",ajustes:"Ajustes"};
+  const titles = {resumen:"Tu semana",correr:"Correr",box:"Box",futbol:"Fútbol",objetivos:"Objetivos",plan:"Plan",ajustes:"Ajustes"};
   $("#hdrTitle").textContent = v==="resumen" ? `Hola${S.athlete?.firstname?", "+S.athlete.firstname:""}` : titles[v];
   $("#hdrEyebrow").textContent = v==="resumen" ? `${DIAS[dow(new Date())]} ${fDate(new Date())}` : "Cuaderno de entreno";
   const app = $("#app"); const sameView = app.dataset.v===v;
-  const NAV = ["resumen","correr","box","objetivos","plan","ajustes"], dir = sameView ? "" : (NAV.indexOf(v) >= NAV.indexOf(app.dataset.v||"resumen") ? "from-right" : "from-left");
+  const NAV = ["resumen","correr","box","futbol","objetivos","plan","ajustes"], dir = sameView ? "" : (NAV.indexOf(v) >= NAV.indexOf(app.dataset.v||"resumen") ? "from-right" : "from-left");
   if(sameView) app.querySelectorAll("input[id],select[id],textarea[id]").forEach(el=>{ if(el.type!=="file") S.form[el.id]=el.value; });
   else S.form = {};
   const focusId = document.activeElement?.id;
-  app.innerHTML = `<div class="stack ${sameView?"":"view "+dir}">${({resumen:vResumen,correr:vCorrer,box:vBox,objetivos:vObjetivos,plan:vPlan,ajustes:vAjustes})[v]()}</div>`;
+  app.innerHTML = `<div class="stack ${sameView?"":"view "+dir}">${({resumen:vResumen,correr:vCorrer,box:vBox,futbol:vFutbol,objetivos:vObjetivos,plan:vPlan,ajustes:vAjustes})[v]()}</div>`;
   app.dataset.v = v;
   if(v==="correr") setTimeout(mountRoutes, 0);
   if(!sameView) countUp(app);
@@ -1902,6 +1984,8 @@ document.addEventListener("click", async e=>{
   if(hs){ const g = document.getElementById("hm_goal"); if(g) S.hmGoal = parseTime(g.value) || S.hmGoal; S.hmStrat = hs.dataset.hmstrat; renderSheet(); return; }
   const sh = e.target.closest("[data-sheet]");
   if(sh){ const k = sh.dataset.sheet; openSheet(k, k==="marca" && sh.dataset.ej ? {ejercicio:sh.dataset.ej, unidad:sh.dataset.un} : k==="futbol" ? {formato: sh.dataset.fmt || footRole(dow(new Date())) || "partido"} : null); return; }
+  const fu = e.target.closest("[data-fut]");
+  if(fu){ openSheet("futDetail", fu.dataset.fut); return; }
   const fd = e.target.closest("[data-footday]");
   if(fd){ haptic(); cycleFootDay(+fd.dataset.footday); render(); return; }
   const rn = e.target.closest("[data-run]");
@@ -1929,6 +2013,7 @@ document.addEventListener("click", async e=>{
   if(act==="mus-clear"){ S.selMus = null; render(); return; }
   if(act==="wodall"){ S.wodAll = !S.wodAll; render(); return; }
   if(act==="runall"){ S.runAll = !S.runAll; render(); return; }
+  if(act==="futall"){ S.futAll = !S.futAll; render(); return; }
   if(act==="close"){ closeSheet(); return; }
   if(act==="notes"){ e.preventDefault(); const card = a.closest(".card, .today"); card.classList.toggle("notes-on"); S.notesOpen = S.notesOpen || new Set(); const key = a.parentElement.textContent.replace(/i$/,""); card.classList.contains("notes-on") ? S.notesOpen.add(key) : S.notesOpen.delete(key); return; }
   if(act==="story"){ weekStory(); return; }
@@ -1962,7 +2047,8 @@ document.addEventListener("submit", e=>{
   if(kind==="strava"){ wipeCred=false; LS.set("wipeCred", false); S.cfg.clientId = data.clientId.trim(); S.cfg.clientSecret = data.clientSecret.trim(); saveCfg(); location.href = stravaAuthUrl(); return; }
   if(kind==="gh"){ S.cfg.ghToken = data.ghToken.trim(); delete S.cfg.gistId; saveCfg(); delete S.err.sync; syncGist().then(()=>{ if(!S.err.sync) toast("Sincronización activada"); }); render(); return; }
   if(kind==="wod"){ const st = boxSessionOn(data.fecha); data.stravaId = st ? st.id : ""; data.accHecho = data.accHecho ? "1" : ""; }
-  addRec({tipo:kind, ...data});
+  if(kind==="futbol" && data.id){ const id = data.id; delete data.id; upsertRec(id, {tipo:"futbol", ...data}); }
+  else addRec({tipo:kind, ...data});
   if(kind==="wod") S.ocr = null;
   f.querySelectorAll("input[id],textarea[id],select[id]").forEach(el=>{ delete S.form[el.id]; });
   if(f.closest("#sheet")) closeSheet();
@@ -1977,7 +2063,7 @@ let tX = null, tY = null, tOk = false;
 document.addEventListener("touchstart", e=>{ const t = e.touches[0]; tX = t.clientX; tY = t.clientY;
   tOk = !!e.target.closest("#app") && !e.target.closest(".leaflet-container,.thumbs,.scroll,input,textarea,select,[data-flip],.hxst,.cal"); }, {passive:true});
 document.addEventListener("touchend", e=>{ if(!tOk || tX==null) return; const t = e.changedTouches[0], dx = t.clientX - tX, dy = t.clientY - tY; tX = null;
-  if(Math.abs(dx) > 80 && Math.abs(dy) < 50 && $("#sheet").hidden){ const tabs = ["resumen","correr","box","objetivos","plan"], i = tabs.indexOf(current()); const j = i + (dx<0 ? 1 : -1);
+  if(Math.abs(dx) > 80 && Math.abs(dy) < 50 && $("#sheet").hidden){ const tabs = ["resumen","correr","box","futbol","objetivos","plan"], i = tabs.indexOf(current()); const j = i + (dx<0 ? 1 : -1);
     if(i>=0 && j>=0 && j<tabs.length){ haptic(); location.hash = tabs[j]; } } }, {passive:true});
 document.addEventListener("keydown", e=>{ if(e.key==="Escape") closeSheet(); if((e.key==="Enter"||e.key===" ") && e.target.matches("[data-mus]")){ e.preventDefault(); e.target.click(); } });
 // Girar el cuerpo deslizando el dedo

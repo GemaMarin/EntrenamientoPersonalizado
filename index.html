@@ -94,7 +94,7 @@ button:disabled{opacity:.5;cursor:default}
 .seg button{padding:7px 12px;font-size:13px}
 .seg button[aria-pressed="true"]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
 nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--surface);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px);padding-left:env(safe-area-inset-left,0px);padding-right:env(safe-area-inset-right,0px)}
-nav.tabs .in{max-width:720px;margin:0 auto;display:grid;grid-template-columns:repeat(5,1fr);height:var(--nav-h)}
+nav.tabs .in{max-width:720px;margin:0 auto;display:grid;grid-template-columns:repeat(6,1fr);height:var(--nav-h)}
 nav.tabs a{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;text-decoration:none;color:var(--muted);font-size:11px;font-weight:600}
 nav.tabs a svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 nav.tabs a[aria-current="page"]{color:var(--fg)}
@@ -420,6 +420,24 @@ nav.tabs{background:color-mix(in srgb,var(--surface) 88%,transparent);backdrop-f
 .daypick button.entreno{background:color-mix(in srgb,var(--foot) 18%,transparent);color:var(--foot)}
 .daypick button.partido{background:var(--foot);color:#fff}
 .daypick button.partido small{color:#fff}
+
+/* ---------- fútbol ---------- */
+.foothero{background:linear-gradient(135deg,#0FB57C 0%,#14A3A0 60%,#2D7DE0 100%);box-shadow:0 14px 34px -14px rgba(15,181,124,.55)}
+.fstats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.fstats div{display:flex;flex-direction:column}
+.fstats b{font-family:var(--display);font-weight:800;font-size:46px;line-height:1}
+.fstats span{font-size:12px;opacity:.85}
+.addbtn.wide{align-self:stretch;padding:14px;font-size:15px;border-radius:16px}
+.futc{display:grid;grid-template-columns:46px minmax(0,1fr) 8px;gap:12px;align-items:center;text-align:left;background:var(--surface-2);border:0;border-radius:14px;padding:10px 12px;color:var(--fg);font-weight:400}
+.ftag{font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:999px;background:color-mix(in srgb,var(--foot) 16%,transparent);color:var(--foot)}
+.ftag.p{background:var(--foot);color:#fff}
+.fline{font-size:13.5px;color:var(--muted)} .fline b{color:var(--fg)}
+.futc .com{margin:0;align-self:flex-start;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.effort{width:8px;height:44px;border-radius:999px;background:var(--line);position:relative;overflow:hidden}
+.effort i{position:absolute;left:0;right:0;bottom:0;height:var(--e);background:var(--foot);border-radius:999px}
+.itembtn{width:100%;text-align:left;background:none;border:0;border-top:1px solid var(--line);border-radius:0;padding:10px 0;color:var(--fg);font-weight:400}
+.list .itembtn:first-child{border-top:0}
+nav.tabs a{font-size:10.5px}
 </style>
 </head>
 <body>
@@ -439,6 +457,7 @@ nav.tabs{background:color-mix(in srgb,var(--surface) 88%,transparent);backdrop-f
     <a href="#resumen" data-v="resumen"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Resumen</a>
     <a href="#correr" data-v="correr"><svg viewBox="0 0 24 24"><circle cx="14" cy="4.5" r="2"/><path d="M6 20l3-5 3 2 1-5 3 3h3M9 11l3-3 3 1"/></svg>Correr</a>
     <a href="#box" data-v="box"><svg viewBox="0 0 24 24"><path d="M2 12h2M20 12h2M5 8v8M19 8v8M8 6v12M16 6v12M8 12h8"/></svg>Box</a>
+    <a href="#futbol" data-v="futbol"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7l4 3-1.5 4.5h-5L8 10zM12 3v4M20.5 9.5 16 10M17 19l-2.5-4.5M7 19l2.5-4.5M3.5 9.5 8 10"/></svg>Fútbol</a>
     <a href="#objetivos" data-v="objetivos"><svg viewBox="0 0 24 24"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg>Objetivos</a>
     <a href="#plan" data-v="plan"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>Plan</a>
   </div>
