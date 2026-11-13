@@ -365,6 +365,8 @@ const SUG = [
   {nombre:"HYROX Madrid · Doubles Women Open", fecha:"2027-03-21", clase:"hibrida", km:"8", objetivo:"", notas:"IFEMA · 8 × (1 km + estación) · estaciones repartidas en pareja", hyrox:"1"},
   {nombre:"Medio Maratón de Madrid", fecha:"2027-04-04", clase:"carrera", km:"21.0975", objetivo:"", notas:""}
 ];
+const evKm = e => +String(e.km||"").replace(",", ".") || 0;
+const evPrio = e => e.prio || (e.clase==="hibrida" || evKm(e)>=15 || !evKm(e) ? "A" : "B");   // A: objetivo principal · B: preparación
 const eventos = () => logs().filter(l=>l.tipo==="evento").sort((a,b)=>a.fecha.localeCompare(b.fecha));
 const futuros = () => eventos().filter(e=>e.fecha>=today());
 const PH = {
@@ -376,7 +378,7 @@ const PH = {
   recuperacion:{n:"Recuperación", c:"var(--warn)", box:1, runs:2, long:[6,8], d:"Semana suave tras la competición."}
 };
 function phases(){
-  const ev = futuros(); if(!ev.length) return [];
+  const ev = futuros().filter(e=>evPrio(e)==="A"); if(!ev.length) return [];
   const t0 = parseISO(today()), segs = [];
   const add = (key,a,b,e) => { if(b < t0 || b < a) return; segs.push({key, start: a<t0 ? t0 : a, end:b, ev:e}); };
   const D1 = parseISO(ev[0].fecha);
@@ -771,6 +773,13 @@ function coachToday(){
   const why = [];
   if(cp) why.push(`Fase <b>${info.n}</b> (${Math.max(1,Math.round((daysBetween(cp.start,cp.end)+1)/7))} sem) camino de ${esc(cp.ev.nombre)}`);
   why.push(`Esta semana: ${nBox}/${info.box} box · ${runs.length}/${info.runs} carreras`);
+  const raceT = futuros().find(e=>e.fecha===t), raceM = futuros().find(e=>e.fecha===iso(addDays(now,1)));
+  if(raceT && !done.length){ const hib = raceT.clase==="hibrida", gp = parseTime(raceT.objetivo), D = evKm(raceT);
+    return {k:"race", c:"var(--box)", t:`Hoy compites: ${raceT.nombre}`, why:["¡Día de carrera!"],
+      d: hib ? "Calienta 15 min: trote suave, movilidad y unas repeticiones cortas de las primeras estaciones. Bebe a sorbos y repasa con tu pareja quién hace qué." :
+        `Desayuna 2–3 h antes lo de siempre. Calienta 10–15 min suave con 3–4 rectas.${gp && D ? ` Sal controlada el primer km a ${fPace(gp/D + (D>=15?6:3))}/km y ve apretando: objetivo ${fTime(gp)}.` : " Sal controlada el primer km y ve de menos a más."}`}; }
+  if(raceM && !done.length){ why.unshift(`Mañana: ${esc(raceM.nombre)}`);
+    return {k:"easy", c:"var(--warn)", t:"Mañana compites", d:"Hoy descanso o 20 min muy suaves con 4 rectas de 15 s. Deja preparado dorsal, ropa y desayuno (nada nuevo) y acuéstate pronto.", why}; }
   if(done.length && done.every(s=>s.cat==="futbol")) return {k:"done", c:"var(--ok)", t:"Fútbol hecho", d:`${done.map(s=>esc(s.name)).join(" + ")} · ${fMin(done.reduce((a,s)=>a+s.min,0))}. Estira gemelos e isquios, hidrátate y cena con hidratos y proteína.${tomorrow==="partido"?"":" Mañana, si te toca correr, que sea suave."}`, why};
   if(done.length) return {k:"done", c:"var(--ok)", t:"Entreno de hoy hecho", d:`${done.map(s=>esc(s.name)).join(" + ")} · ${fMin(done.reduce((a,s)=>a+s.min,0))}. Hidrátate, come algo con proteína e hidratos y estira 5 minutos.`, why};
   if(ck && ck.sintoma==="si") return {k:"rest", c:"var(--bad)", t:"Hoy, descanso", d:"Has marcado mareo o molestia. Descansa, hidrátate y, si se repite, coméntaselo a tu médico antes de volver a la intensidad.", why:["Chequeo de hoy: mareo o molestia"]};
@@ -818,7 +827,7 @@ function todayCard(){
   const c = coachToday(), ck = checkinToday();
   const opt = (f, vals) => `<div class="ckrow"><span>${f[1]}</span><div class="ckseg">${vals.map(([v,l])=>`<button type="button" data-ck="${f[0]}" data-v="${v}" aria-pressed="${ck && ck[f[0]]===v}">${l}</button>`).join("")}</div></div>`;
   return `<div class="today" style="--c:${c.c}">
-    <div class="row between"><span class="eyebrow">Hoy · ${DIAS[dow(new Date())]} ${fDate(new Date())}</span><span class="tk">${{run:"Correr",box:"Box",rest:"Descanso",easy:"Suave",done:"Hecho",foot:"Fútbol"}[c.k]}</span></div>
+    <div class="row between"><span class="eyebrow">Hoy · ${DIAS[dow(new Date())]} ${fDate(new Date())}</span><span class="tk">${{run:"Correr",box:"Box",rest:"Descanso",easy:"Suave",done:"Hecho",foot:"Fútbol",race:"Competición"}[c.k]}</span></div>
     <h2 class="tt">${c.t}</h2>
     <p class="td">${c.d}</p>
     ${c.k==="foot"?`<button class="addbtn foot" data-sheet="futbol" data-fmt="${c.role}">Apuntar ${c.role==="partido"?"partido":"entreno"}</button>`:""}
@@ -889,29 +898,35 @@ function hxUpdate(){ const h = S.hx; const el = document.getElementById("hxsum")
 /* =========================================================
    PLAN DE CARRERA (MEDIA)
    ========================================================= */
-function hmSplits(goal, strat){
-  const D = 21.0975, g = goal/D, out = [];
+function hmSplits(goal, strat, D=21.0975){
+  const g = goal/D, out = [], k = D>=15 ? 6 : 3, a = Math.max(1, Math.round(D*0.47)), b = Math.max(a+1, Math.round(D*0.85));
   let paceAt;
-  if(strat==="neg"){ const p1 = g+6, p2 = g, p3 = (goal - 10*p1 - 8*p2)/(D-18); paceAt = km => km<=10 ? p1 : km<=18 ? p2 : p3; }
+  if(strat==="neg" && D>=3){ const p1 = g+k, p2 = g, p3 = (goal - a*p1 - (b-a)*p2)/(D-b); paceAt = km => km<=a ? p1 : km<=b ? p2 : p3; }
   else paceAt = () => g;
   let acc = 0;
-  for(let k=1;k<=22;k++){ const d = Math.min(1, D-(k-1)); if(d<=0) break; const p = paceAt(k); acc += p*d; out.push({k, d, p, acc}); }
+  for(let km=1; km<=Math.ceil(D); km++){ const d = Math.min(1, D-(km-1)); if(d<=0) break; const p = paceAt(km); acc += p*d; out.push({k:km, d, p, acc}); }
   return out;
 }
-function hmSheet(){
-  const ev = futuros().find(e=>e.clase==="carrera" && Math.abs((+String(e.km).replace(",", "."))-21.1)<0.3);
-  const pr = bestEfforts()["half-marathon"]?.t;
-  const goal = S.hmGoal || parseTime(ev?.objetivo) || (pr ? Math.round(pr - 120) : 6600), strat = S.hmStrat || "neg";
-  const sp = hmSplits(goal, strat), at = k => sp.find(s=>s.k===k)?.acc;
-  return [ev ? ev.nombre : "Plan de media maratón", `<div class="stack" style="gap:14px">
-    <div class="grid2">${field("hm_goal","Objetivo",`<input id="hm_goal" value="${fTime(goal)}" inputmode="numeric" placeholder="1:48:00">`)}
+const PRK = D => Math.abs(D-5)<0.3 ? "5k" : Math.abs(D-10)<0.3 ? "10k" : Math.abs(D-21.1)<0.3 ? "half-marathon" : Math.abs(D-42.2)<0.3 ? "marathon" : null;
+function hmSheet(evId){
+  const ev = futuros().find(e=>e.id===evId) || futuros().find(e=>e.clase==="carrera" && Math.abs(evKm(e)-21.1)<0.3);
+  if(S.planEv !== ev?.id){ S.planEv = ev?.id; S.hmGoal = null; }
+  const D = ev ? (Math.abs(evKm(ev)-21.1)<0.3 ? 21.0975 : Math.abs(evKm(ev)-42.2)<0.3 ? 42.195 : evKm(ev)) : 21.0975;
+  const b = bestEfforts(), pk = PRK(D), pr = pk ? b[pk]?.t : null;
+  const ref = b["half-marathon"] || b["10k"] || b["5k"], refD = b["half-marathon"] ? 21.0975 : b["10k"] ? 10 : 5;
+  const goal = S.hmGoal || parseTime(ev?.objetivo) || (pr ? Math.round(pr - (D<=10 ? 15 : 120)) : ref ? Math.round(riegel(ref.t, refD, D)) : Math.round(D*330)), strat = S.hmStrat || "neg";
+  const sp = hmSplits(goal, strat, D), at = k => sp.find(s=>s.k===k)?.acc;
+  const marks = D>=15 ? [5,10,15] : D>=8 ? [3,5,8] : [2,3,4].filter(k=>k<D);
+  const gels = D>=30 ? [7,14,21,28,35] : D>=15 ? [8,15] : [];
+  return [ev ? ev.nombre : "Plan de carrera", `<div class="stack" style="gap:14px">
+    <div class="grid2">${field("hm_goal","Objetivo",`<input id="hm_goal" value="${fTime(goal)}" inputmode="numeric" placeholder="${D<=10?"24:00":"1:48:00"}">`)}
       <label>Estrategia<div class="seg" style="margin-top:2px"><button type="button" data-hmstrat="neg" aria-pressed="${strat==="neg"}">Parcial negativo</button><button type="button" data-hmstrat="even" aria-pressed="${strat==="even"}">Constante</button></div></label></div>
-    <div class="hxsum"><div><span class="eyebrow">Ritmo medio</span><span class="num huge2">${fPace(goal/21.0975)}<small>/km</small></span></div>
-      <div class="hxs"><div><b>${fTime(at(5))}</b><span>paso 5 km</span></div><div><b>${fTime(at(10))}</b><span>paso 10 km</span></div><div><b>${fTime(at(15))}</b><span>paso 15 km</span></div></div>
-      ${pr?`<p class="small">Tu marca: <b>${fTime(pr)}</b> (${fPace(pr/21.0975)}/km). Objetivo ${goal<pr?`${fTime(pr-goal)} más rápido`:`${fTime(goal-pr)} más lento`}.</p>`:""}</div>
-    <div class="kmgrid">${sp.map(s=>`<div class="kmc${s.k===8||s.k===15?" gel":""}"><span class="k">${s.k===22?"21,1":s.k}</span><b>${fPace(s.p)}</b><small>${fTime(s.acc)}</small></div>`).join("")}</div>
-    <p class="small"><span class="gelmark"></span> Gel con agua en los km 8 y 15 (unos 40 y 75 minutos). Pruébalo antes en las tiradas largas.</p>
-    <p class="note">${strat==="neg"?"Parcial negativo: primeros 10 km 6 s/km más lentos que el objetivo, del 10 al 18 a ritmo objetivo y el final más rápido. Suele ser la estrategia más eficaz para la media.":"Ritmo constante todo el recorrido."} Cálculo propio; ajusta por el perfil del recorrido.</p>
+    <div class="hxsum"><div><span class="eyebrow">Ritmo medio · ${D.toString().replace(".",",")} km</span><span class="num huge2">${fPace(goal/D)}<small>/km</small></span></div>
+      <div class="hxs">${marks.map(k=>`<div><b>${fTime(at(k))}</b><span>paso ${k} km</span></div>`).join("")}</div>
+      ${pr?`<p class="small">Tu marca: <b>${fTime(pr)}</b> (${fPace(pr/D)}/km). Objetivo ${goal<pr?`${fTime(pr-goal)} más rápido`:`${fTime(goal-pr)} más lento`}.</p>`:""}</div>
+    <div class="kmgrid">${sp.map(s=>`<div class="kmc${gels.includes(s.k)?" gel":""}"><span class="k">${s.d<1?String(Math.round((s.k-1+s.d)*10)/10).replace(".",","):s.k}</span><b>${fPace(s.p)}</b><small>${fTime(s.acc)}</small></div>`).join("")}</div>
+    ${gels.length?`<p class="small"><span class="gelmark"></span> Gel con agua en los km ${gels.join(", ")}. Pruébalo antes en las tiradas largas.</p>`:`<p class="small">En ${D<=5?"un 5K":"un 10K"} no necesitas geles: desayuna 2–3 h antes y calienta 10–15 min con 3–4 rectas.</p>`}
+    <p class="note">${strat==="neg"?`Parcial negativo: la primera mitad ${D>=15?6:3} s/km más lenta que el objetivo, después a ritmo y el final más rápido.`:"Ritmo constante todo el recorrido."} Cálculo propio; ajusta por el perfil del recorrido.</p>
     ${ev?`<button class="primary big" type="button" data-act="hmsave">Guardar objetivo en la competición</button>`:""}
   </div>`];
 }
@@ -995,7 +1010,8 @@ function miniRing(p, col, label){
   return `<svg class="mring" viewBox="0 0 76 76" aria-hidden="true"><circle cx="38" cy="38" r="${r}" fill="none" stroke="currentColor" stroke-opacity=".18" stroke-width="8"/><circle cx="38" cy="38" r="${r}" fill="none" stroke="${col}" stroke-width="8" stroke-linecap="round" stroke-dasharray="${c*Math.max(.02,Math.min(1,p))} ${c}" transform="rotate(-90 38 38)"/><text x="38" y="44" text-anchor="middle" style="font:800 19px var(--display);fill:currentColor">${label}</text></svg>`;
 }
 function bento(ss){
-  const now = new Date(), e = futuros()[0], cp = currentPhase();
+  const now = new Date(), e = futuros().find(x=>evPrio(x)==="A") || futuros()[0], cp = currentPhase();
+  const prep = e ? futuros().find(x=>evPrio(x)==="B" && x.fecha < e.fecha) : null;
   const runs = ss.filter(s=>s.cat==="run"), m0 = new Date(now.getFullYear(), now.getMonth(), 1);
   const kmM = runs.filter(r=>r.date>=m0).reduce((t,r)=>t+r.km,0), lr = runs[0];
   const wod = logs().filter(l=>l.tipo==="wod").sort((a,b)=>b.fecha.localeCompare(a.fecha))[0];
@@ -1005,7 +1021,7 @@ function bento(ss){
   let phaseP = 0; if(cp){ phaseP = Math.min(1, (daysBetween(cp.start, now)+1)/(daysBetween(cp.start, cp.end)+1)); }
   const T = (href, cls, inner, label) => `<a class="bt ${cls}" href="${href}" aria-label="${label}">${inner}<span class="go" aria-hidden="true">›</span></a>`;
   return `<div class="bento">
-    ${T("#objetivos", "b-goal wide", e ? `<span class="bl">Próximo objetivo</span><div class="brow"><span class="num bnum" data-count="${daysBetween(now, parseISO(e.fecha))}">${daysBetween(now, parseISO(e.fecha))}</span><span class="bcol"><b>días</b><span class="bname">${esc(e.nombre)}</span>${cp?`<span class="bsub">Fase ${cp.info.n} · ${Math.round(phaseP*100)}%</span>`:""}</span></div>` : `<span class="bl">Objetivos</span><span class="bname">Añade tu próxima competición</span>`, "Objetivos")}
+    ${T("#objetivos", "b-goal wide", e ? `<span class="bl">Próximo objetivo</span><div class="brow"><span class="num bnum" data-count="${daysBetween(now, parseISO(e.fecha))}">${daysBetween(now, parseISO(e.fecha))}</span><span class="bcol"><b>días</b><span class="bname">${esc(e.nombre)}</span>${cp?`<span class="bsub">Fase ${cp.info.n} · ${Math.round(phaseP*100)}%</span>`:""}</span></div>${prep?`<span class="bsub">Antes: ${esc(prep.nombre)} · ${DIAS[dow(parseISO(prep.fecha))]} ${fDate(parseISO(prep.fecha))}</span>`:""}` : `<span class="bl">Objetivos</span><span class="bname">Añade tu próxima competición</span>`, "Objetivos")}
     ${T("#plan", "b-week", `<span class="bl">Tu semana</span>${miniRing(wg.n? wg.d/wg.n : 0, "#fff", `${wg.d}/${wg.n}`)}<span class="bsub">sesiones del plan</span>`, "Plan de la semana")}
     ${T("#correr", "b-run", `<span class="bl">Correr</span><span class="bbig"><b data-count="${Math.round(kmM)}">${Math.round(kmM)}</b> km</span><span class="bsub">este mes</span>${lr && lr.poly ? `<span class="bthumb">${routeThumb(lr.poly, 44)}</span>` : ""}`, "Correr")}
     ${T("#box", "b-box", `<span class="bl">Último WOD</span>${wod ? `<span class="bname sm">${esc(wod.nombre.split("·")[0].trim())}</span>${wod.resultado?`<span class="bres">${esc(wod.resultado)}</span>`:""}<span class="bsub">${fDate(parseISO(wod.fecha))}</span>` : `<span class="bsub">Sube tu primera captura</span>`}`, "Box")}
@@ -1757,6 +1773,7 @@ function fmEvento(p={}){ return `<form data-form="evento">
   ${field("e_c","Tipo",`<select id="e_c" name="clase"><option value="carrera">Carrera a pie</option><option value="hibrida">Híbrida / Hyrox</option><option value="otra">Otra</option></select>`)}</div>
   <div class="grid2">${field("e_km","Distancia (km)",`<input id="e_km" name="km" inputmode="decimal" value="${val(p.km)}" placeholder="21.0975">`)}
   ${field("e_o","Tiempo objetivo",`<input id="e_o" name="objetivo" placeholder="1:45:00">`)}</div>
+  ${field("e_pr","Importancia",`<select id="e_pr" name="prio"><option value="A" ${evPrio({km:p.km, clase:p.clase})==="A"?"selected":""}>Objetivo principal (el plan se organiza para ella)</option><option value="B" ${evPrio({km:p.km, clase:p.clase})==="B"?"selected":""}>Carrera de preparación</option></select>`)}
   ${field("e_no","Notas",`<input id="e_no" name="notas" placeholder="Pareja, categoría, estaciones…">`)}
   <button class="primary big" type="submit">Guardar competición</button></form>`; }
 function fmPR(){ return `<form data-form="pr">
@@ -2024,7 +2041,7 @@ const SHEETS = {
   futbol: p => ["Fútbol", fmFutbol(p||{})],
   futDetail: id => futSheet(id),
   hyrox: () => hyroxSheet(),
-  hmplan: () => hmSheet(),
+  hmplan: id => hmSheet(id),
   story: url => ["Tu semana", `<div class="stack" style="gap:10px;align-items:center"><img src="${url}" alt="Resumen de tu semana" class="storyimg"><p class="small muted">Mantén pulsada la imagen para guardarla o compartirla.</p></div>`],
   wodDetail: id => { const w = logs().find(l=>l.id===id); if(!w) return ["WOD", "<p>Ya no existe.</p>"];
     const a = Body.analyze(wodText(w)), st = boxSessionOn(w.fecha), d = parseISO(w.fecha);
@@ -2053,6 +2070,7 @@ const ICON = {
   bar:'<svg viewBox="0 0 24 24"><path d="M2 12h20M5 8v8M19 8v8M8 6v12M16 6v12"/></svg>'
 };
 function openSheet(kind, data){
+  if(kind==="evento") S.prTouched = false;
   S.sheetState = {kind, data}; renderSheet();
   const el = $("#sheet"); el.hidden = false; document.body.classList.add("noscroll");
   requestAnimationFrame(()=>requestAnimationFrame(()=>el.classList.add("open")));
@@ -2079,7 +2097,9 @@ function timelineSvg(ps){
   const W=400, H=58, x = d => 4 + (W-8)*daysBetween(t0,d)/span;
   let g = "";
   ps.forEach(p => { g += `<rect x="${x(p.start)}" y="10" width="${Math.max(2, x(addDays(p.end,1))-x(p.start)-1.5)}" height="16" rx="4" fill="${PH[p.key].c}"><title>${PH[p.key].n}: ${fDate(p.start)} – ${fDate(p.end)}</title></rect>`; });
-  futuros().forEach(e => { const xx = x(addDays(parseISO(e.fecha),1))-1; g += `<line x1="${xx}" x2="${xx}" y1="4" y2="32" stroke="var(--fg)" stroke-width="2"/><text x="${Math.min(W-4,xx)}" y="46" text-anchor="end" style="fill:var(--fg);font-weight:600">${fDate(parseISO(e.fecha))}</text>`; });
+  futuros().filter(e=>parseISO(e.fecha)<=t1).forEach(e => { const xx = x(addDays(parseISO(e.fecha),1))-1, A = evPrio(e)==="A";
+    g += A ? `<line x1="${xx}" x2="${xx}" y1="4" y2="32" stroke="var(--fg)" stroke-width="2"/><text x="${Math.min(W-4,xx)}" y="46" text-anchor="end" style="fill:var(--fg);font-weight:600">${fDate(parseISO(e.fecha))}</text>`
+           : `<circle cx="${xx}" cy="18" r="5" fill="var(--surface)" stroke="var(--fg)" stroke-width="2"><title>${esc(e.nombre)} (preparación)</title></circle>`; });
   g += `<text x="4" y="46">hoy</text>`;
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Fases hasta tus competiciones">${g}</svg>`;
 }
@@ -2141,10 +2161,10 @@ function eventCard(e){
     </div>`;
   }
   return `<div class="card ev" style="--c:${hib?"var(--box)":"var(--run)"}">
-    <div class="row between" style="align-items:flex-start;flex-wrap:nowrap"><div class="stack" style="gap:2px;min-width:0;flex:1"><span class="eyebrow">${hib?"Híbrida":"Carrera"} · ${DIAS[dow(parseISO(e.fecha))]} ${fDate(parseISO(e.fecha))} ${e.fecha.slice(0,4)}</span><h3 style="font-size:22px">${esc(e.nombre)}</h3>${e.notas?`<span class="small muted">${esc(e.notas)}</span>`:""}</div>
+    <div class="row between" style="align-items:flex-start;flex-wrap:nowrap"><div class="stack" style="gap:2px;min-width:0;flex:1"><span class="eyebrow">${hib?"Híbrida":"Carrera"} · ${DIAS[dow(parseISO(e.fecha))]} ${fDate(parseISO(e.fecha))} ${e.fecha.slice(0,4)} · <span style="color:${evPrio(e)==="A"?"var(--box)":"var(--run)"}">${evPrio(e)==="A"?"Objetivo principal":"Preparación"}</span></span><h3 style="font-size:22px">${esc(e.nombre)}</h3>${e.notas?`<span class="small muted">${esc(e.notas)}</span>`:""}</div>
     <div class="cdbig"><span class="num">${d}</span><span class="lab">días</span></div></div>
     ${extra}
-    <div class="row between">${hib && (e.hyrox || /hyrox/i.test(e.nombre)) ? `<button class="addbtn" data-sheet="hyrox">Planificar la carrera</button>` : (!hib && Math.abs(km-21.1)<0.3) ? `<button class="addbtn" data-sheet="hmplan">Plan de carrera por km</button>` : "<span></span>"}${delBtn(e.id)}</div>
+    <div class="row between">${hib && (e.hyrox || /hyrox/i.test(e.nombre)) ? `<button class="addbtn" data-sheet="hyrox">Planificar la carrera</button>` : (!hib && km>=1) ? `<button class="addbtn" data-sheet="hmplan" data-ev="${e.id}">Plan de carrera por km</button>` : "<span></span>"}${delBtn(e.id)}</div>
   </div>`;
 }
 function vObjetivos(){
@@ -2344,7 +2364,7 @@ document.addEventListener("click", async e=>{
   const hs = e.target.closest("[data-hmstrat]");
   if(hs){ const g = document.getElementById("hm_goal"); if(g) S.hmGoal = parseTime(g.value) || S.hmGoal; S.hmStrat = hs.dataset.hmstrat; renderSheet(); return; }
   const sh = e.target.closest("[data-sheet]");
-  if(sh){ const k = sh.dataset.sheet; openSheet(k, k==="marca" && sh.dataset.ej ? {ejercicio:sh.dataset.ej, unidad:sh.dataset.un} : k==="futbol" ? {formato: sh.dataset.fmt || footRole(dow(new Date())) || "partido"} : null); return; }
+  if(sh){ const k = sh.dataset.sheet; if(k==="hmplan"){ openSheet(k, sh.dataset.ev); return; } openSheet(k, k==="marca" && sh.dataset.ej ? {ejercicio:sh.dataset.ej, unidad:sh.dataset.un} : k==="futbol" ? {formato: sh.dataset.fmt || footRole(dow(new Date())) || "partido"} : null); return; }
   const rv = e.target.closest("[data-rview]");
   if(rv){ S.rview = rv.dataset.rview; S.rday = null; S.rdir = ""; haptic(); renderSheet(); return; }
   const rmo = e.target.closest("[data-rmon]");
@@ -2404,7 +2424,7 @@ document.addEventListener("click", async e=>{
   if(act==="notes"){ e.preventDefault(); const card = a.closest(".card, .today"); card.classList.toggle("notes-on"); S.notesOpen = S.notesOpen || new Set(); const key = a.parentElement.textContent.replace(/i$/,""); card.classList.contains("notes-on") ? S.notesOpen.add(key) : S.notesOpen.delete(key); return; }
   if(act==="story"){ weekStory(); return; }
   if(act==="hxsave"){ upsertRec("hyrox-plan", {tipo:"hyroxplan", fecha:today(), json:JSON.stringify(S.hx)}); haptic(); toast("Plan HYROX guardado"); closeSheet(); return; }
-  if(act==="hmsave"){ const ev = futuros().find(x=>x.clase==="carrera" && Math.abs((+String(x.km).replace(",", "."))-21.1)<0.3); const g = parseTime(document.getElementById("hm_goal")?.value);
+  if(act==="hmsave"){ const ev = futuros().find(x=>x.id===S.planEv); const g = parseTime(document.getElementById("hm_goal")?.value);
     if(ev && g){ upsertRec(ev.id, {objetivo: fTime(g)}); haptic(); toast("Objetivo guardado: "+fTime(g)); closeSheet(); render(); } return; }
   if(act==="bulkclose"){ S.bulk = null; render(); return; }
   if(act==="refresh") syncStrava(true);
@@ -2419,13 +2439,15 @@ document.addEventListener("change", async e=>{
   if(e.target.id==="ocrFile" && e.target.files[0]){ const f = e.target.files[0]; e.target.value = ""; closeSheet(); ocrRead(f, false); return; }
   if(e.target.id==="bulkFiles" && e.target.files.length){ const fs = [...e.target.files]; e.target.value = ""; closeSheet(); if(location.hash!=="#box") location.hash = "box"; bulkImport(fs); return; }
   if(e.target.id==="calc_ex"){ S.calcEx = e.target.value; render(); return; }
+  if(e.target.id==="e_pr"){ S.prTouched = true; return; }
+  if(e.target.id==="e_c" && !S.prTouched){ const sel = document.getElementById("e_pr"); if(sel) sel.value = evPrio({km:document.getElementById("e_km")?.value, clase:e.target.value}); return; }
   if(e.target.id==="ff_from"){ S.fillFrom = e.target.value; renderSheet(); return; }
   if(e.target.id==="ff_e"){ S.fillE = e.target.checked; renderSheet(); return; }
   if(e.target.id==="ff_p"){ S.fillP = e.target.checked; renderSheet(); return; }
   if(e.target.dataset.ftime || e.target.dataset.fdur){ const k = e.target.dataset.ftime || e.target.dataset.fdur, p = footPrefs(), T = footTimes();
     if(e.target.dataset.ftime) T[k].h = e.target.value; else T[k].d = Math.max(15, Math.min(180, +e.target.value||T[k].d));
     upsertRec("pref-futbol", {tipo:"pref", fecha:today(), entreno:p.entreno.join(","), partido:p.partido.join(","), hEntreno:T.entreno.h, dEntreno:String(T.entreno.d), hPartido:T.partido.h, dPartido:String(T.partido.d)}); toast("Horario guardado"); return; }
-  if(e.target.id==="hm_goal"){ const g = parseTime(e.target.value); if(g && g>3600 && g<14400 && g!==S.hmGoal){ S.hmGoal = g; setTimeout(renderSheet, 0); } return; }
+  if(e.target.id==="hm_goal"){ const g = parseTime(e.target.value); if(g && g>300 && g<21600 && g!==S.hmGoal){ S.hmGoal = g; setTimeout(renderSheet, 0); } return; }
   if(e.target.dataset.acc){ const r = S.recs.find(x=>x.id===e.target.dataset.acc); if(r){ r.accHecho = e.target.checked ? "1" : ""; r.mod = Date.now(); LS.set("recs", S.recs); schedulePush(); render(); toast(e.target.checked ? "Accesorios hechos" : "Accesorios sin hacer"); } return; }
   if(e.target.id!=="importFile" || !e.target.files[0]) return;
   try{ const j = JSON.parse(await e.target.files[0].text()); const rs = (j.registros||[]).filter(r=>r && r.id && r.tipo);
@@ -2447,6 +2469,7 @@ document.addEventListener("submit", e=>{
   haptic(); toast(kind==="wod" ? "WOD guardado" : kind==="evento" ? "Competición guardada" : kind==="futbol" ? "Fútbol guardado" : "Guardado"); render();
 });
 document.addEventListener("input", e=>{
+  if(e.target.id==="e_km" && !S.prTouched){ const sel = document.getElementById("e_pr"), c = document.getElementById("e_c"); if(sel) sel.value = evPrio({km:e.target.value, clase:c?.value}); }
   if(e.target.id==="rq" || e.target.id==="mq"){ S[e.target.id] = e.target.value; const id = e.target.id, pos = e.target.selectionStart; renderSheet(); const el = document.getElementById(id); if(el){ el.focus(); try{ el.setSelectionRange(pos, pos); }catch(err){} } return; }
   if(e.target.id==="f_rpe"){ const o = document.getElementById("f_rpe_v"); if(o) o.textContent = e.target.value+"/10"; }
   if(e.target.dataset && e.target.dataset.hxpct!=null){ const h = hxGet(); h.st[+e.target.dataset.hxpct].pct = +e.target.value; hxUpdate(); }
