@@ -2013,6 +2013,7 @@ function vBox(){
   return `
   ${o.busy || (o.msg && !S.sheetState) ? `<div class="banner ${o.busy?"info":""}" id="ocrMsg">${esc(o.msg)}</div>`:""}
   ${S.bulk ? bulkCard() : ""}
+  ${boxComp()}
   <div class="statrow">
     <div><span class="num">${(last90.length/(90/7)).toFixed(1)}</span><span class="lab">sesiones / semana</span></div>
     <div><span class="num">${last90.length? Math.round(last90.reduce((t,s)=>t+s.min,0)/last90.length):0}′</span><span class="lab">duración media</span></div>
@@ -2132,6 +2133,32 @@ const HYROX = [
   {n:"Sandbag lunges", d:"100 m · 10 kg", mv:["Zancadas"], mk:/lunge|zancada/i},
   {n:"Wall balls", d:"100 reps · 4 kg", mv:["Wall balls"], mk:/wall ?ball/i}
 ];
+function hxReadiness(){
+  const now = new Date(), wods = logs().filter(l=>l.tipo==="wod" && daysBetween(parseISO(l.fecha),now)<90);
+  const cnt = {}; wods.forEach(w=>Object.keys(Body.analyze(wodText(w)).moves).forEach(m=>cnt[m]=(cnt[m]||0)+1));
+  const marcas = logs().filter(l=>l.tipo==="marca");
+  return HYROX.map(st => { const c = st.mv.reduce((t,m)=>t+(cnt[m]||0),0), mk = marcas.some(m=>st.mk.test(m.ejercicio)); return {n:st.n, c, v:Math.min(1, c/4 + (mk?.15:0))}; });
+}
+function boxComp(){
+  const hx = futuros().filter(e=>e.clase==="hibrida");
+  if(!hx.length) return `<button class="hxadd" data-sheet="evento">${QI.wod}<span><b>¿Tienes un HYROX o una competición híbrida?</b><small>Añádela y verás aquí tu preparación por estaciones</small></span></button>`;
+  const now = new Date(), cp = currentPhase(), R = hxReadiness(), weak = [...R].sort((a,b)=>a.v-b.v).slice(0,3), ready = R.filter(r=>r.v>=1).length;
+  return hx.map((e,i)=>{ const d = parseISO(e.fecha), days = daysBetween(now, d), isHy = e.hyrox || /hyrox/i.test(e.nombre);
+    return `<div class="hxcard">
+      <div class="row between"><span class="mtag2">${evPrio(e)==="A"?"★ Objetivo principal":"Competición híbrida"}</span><span class="mdate">${DIAS[dow(d)]} ${fDate(d)}</span></div>
+      <span class="mrname" style="font-size:22px;-webkit-line-clamp:3">${esc(e.nombre)}</span>
+      <div class="hxtop">
+        <div class="stack" style="gap:6px;min-width:0">
+          <div class="mrow"><span class="num mbig" data-count="${days}">${days}</span><span class="mcol"><b>días</b></span></div>
+          ${cp && i===0?`<span class="mch" style="align-self:flex-start">Fase ${cp.info.n.toLowerCase()}</span>`:""}
+          ${isHy && i===0?`<span class="small" style="opacity:.92"><b>${ready}/8</b> estaciones bien entrenadas</span>`:""}
+        </div>
+        ${isHy && i===0 ? `<div class="hxradar">${radarSvg(R.map(r=>r.v), ["Ski","Push","Pull","BBJ","Remo","Farm.","Lung.","WB"])}</div>` : ""}
+      </div>
+      ${isHy && i===0 ? `<div class="hxweak"><span class="small" style="opacity:.9">A reforzar:</span>${weak.map(w=>`<span class="mch">${w.n}${w.c?` · ${w.c}×`:" · nunca"}</span>`).join("")}</div>` : ""}
+      <div class="row" style="gap:8px">${isHy?`<button class="mbtn" data-sheet="hyrox">Planificar carrera</button>`:""}<a class="mbtn ghostw" href="#objetivos">Ver estaciones</a></div>
+    </div>`; }).join("");
+}
 function hyroxBlock(){
   const now = new Date(), wods = logs().filter(l=>l.tipo==="wod" && daysBetween(parseISO(l.fecha),now)<90);
   const cnt = {}; wods.forEach(w=>Object.keys(Body.analyze(wodText(w)).moves).forEach(m=>cnt[m]=(cnt[m]||0)+1));

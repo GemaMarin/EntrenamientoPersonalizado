@@ -645,6 +645,23 @@ input[type=search]{width:100%}
 .mrc.add .plus{width:44px;height:44px;border-radius:50%;background:var(--surface-2);display:grid;place-items:center;font-size:26px;color:var(--run)}
 .gnext{display:flex;flex-direction:column;gap:3px;border-top:1px solid rgba(255,255,255,.3);padding-top:8px;margin-top:4px}
 .gnext span{font-size:13px;opacity:.95;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.gnext b{font-family:var(--display);font-size:16px}
+
+/* ---------- competición híbrida en Box ---------- */
+.hxcard{border-radius:22px;padding:16px;color:#fff;display:flex;flex-direction:column;gap:10px;background:linear-gradient(140deg,#F08C1A 0%,#FF4D7D 60%,#E0368F 100%);box-shadow:0 14px 34px -14px rgba(255,77,125,.55);position:relative;overflow:hidden;isolation:isolate}
+.hxcard::after{content:"";position:absolute;width:180px;height:180px;border-radius:50%;left:-60px;bottom:-90px;background:rgba(255,255,255,.12);z-index:-1}
+.hxtop{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:8px;align-items:center}
+.hxradar{margin:-10px -8px -10px 0}
+.hxradar .radar{width:100%;height:auto}
+.hxradar .radar polygon[fill="none"],.hxradar .radar line{stroke:rgba(255,255,255,.35)}
+.hxradar .radar polygon[fill="var(--box)"]{fill:#fff;fill-opacity:.35;stroke:#fff}
+.hxradar .radar circle{fill:#fff}
+.hxradar .radar text{fill:#fff!important;font-size:15px}
+.hxweak{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.mbtn.ghostw{background:rgba(255,255,255,.2);color:#fff;text-decoration:none}
+.hxadd{display:flex;gap:12px;align-items:center;text-align:left;background:var(--surface);border:2px dashed var(--line);border-radius:18px;padding:14px;color:var(--fg);font-weight:400}
+.hxadd svg{width:34px;height:34px;flex:none;fill:none;stroke:var(--box);stroke-width:1.8}
+.hxadd b{display:block;font-size:14.5px}.hxadd small{display:block;color:var(--muted);font-size:12.5px}
+@media (max-width:370px){.hxtop{grid-template-columns:minmax(0,1fr) 120px}}
 </style>
 </head>
 <body>
