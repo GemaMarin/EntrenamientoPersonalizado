@@ -118,7 +118,7 @@ async function api(path){
 }
 function normAct(a){
   const km = (a.distance||0)/1000;
-  return { id:String(a.id), name:a.name, sport:a.sport_type||a.type, start:a.start_date_local,
+  return { id:String(a.id_str || a.id), name:a.name,   // id_str: Strava pasa a ids de 64 bits (jun 2027) sport:a.sport_type||a.type, start:a.start_date_local,
     km, min:(a.moving_time||0)/60, sec:a.moving_time||0, elev:a.total_elevation_gain||0,
     pace: km>0.2 ? a.moving_time/km : null, prs:a.pr_count||0, hr:a.has_heartrate?a.average_heartrate:null, maxhr:a.max_heartrate||null,
     watts:a.average_watts||null, kj:a.kilojoules||null, trainer:!!a.trainer, race:a.workout_type===1, photos:a.total_photo_count||0, poly:a.map?.summary_polyline||"" };
@@ -197,23 +197,60 @@ async function gh(path, opts={}){
   if(!r.ok) throw {code:"gh_http", message:"GitHub respondió "+r.status};
   return r.status===204 ? null : r.json();
 }
-async function findOrCreateGist(){
-  for(let page=1; page<=5; page++){
+async function listAppGists(){
+  const out = [];
+  for(let page=1; page<=10; page++){
     const list = await gh(`/gists?per_page=100&page=${page}`);
-    const g = list.find(g => g.files && g.files[GIST_FILE]);
-    if(g){ S.cfg.gistId = g.id; saveCfg(); return; }
+    list.filter(g => g.files && g.files[GIST_FILE]).forEach(g => out.push(g));
     if(list.length<100) break;
+  }
+  return out;
+}
+function parseGistFile(txt){ const j = JSON.parse(txt); if(!j || !Array.isArray(j.registros)) throw new Error("formato"); return {registros:j.registros, secreto:j.secreto||null}; }
+async function readGistObj(g){
+  const f = g.files && g.files[GIST_FILE]; if(!f) throw {code:"gh_read", message:"El Gist no tiene el archivo de datos."};
+  let txt = f.content;
+  if(f.truncated || txt==null){ const r = await fetch(f.raw_url, {cache:"no-store"}); if(!r.ok) throw {code:"gh_read", message:"No se pudo leer el Gist completo."}; txt = await r.text(); }
+  try{ return parseGistFile(txt); }catch(e){ throw {code:"gh_read", message:"El archivo del Gist no se pudo leer; no se ha tocado nada."}; }
+}
+const alive = rs => rs.filter(r=>!r.borrado).length;
+async function findOrCreateGist(){
+  const cands = await listAppGists();
+  if(cands.length){
+    // Si hay varios (p. ej. tras cambiar el token), se queda con el que más datos tiene
+    let best = null, bestN = -1;
+    for(const g of cands){ try{ const full = await gh("/gists/"+g.id), n = alive((await readGistObj(full)).registros); if(n>bestN){ best = g; bestN = n; } }catch(e){} }
+    S.cfg.gistId = (best || cands[0]).id; saveCfg(); return;
   }
   const g = await gh("/gists", {method:"POST", body: JSON.stringify({description:"Cuaderno de Entreno · datos", public:false, files:{[GIST_FILE]:{content: JSON.stringify({v:1, registros:S.recs}, null, 1)}}})});
   S.cfg.gistId = g.id; saveCfg();
 }
-async function readGist(){
-  const g = await gh("/gists/"+S.cfg.gistId);
-  const f = g.files[GIST_FILE];
-  if(!f) return {registros:[]};
-  let txt = f.content;
-  if(f.truncated){ txt = await (await fetch(f.raw_url)).text(); }
-  try{ const j = JSON.parse(txt); return {registros:j.registros||[], secreto:j.secreto||null}; }catch(e){ return {registros:[]}; }
+async function readGist(){ return readGistObj(await gh("/gists/"+S.cfg.gistId)); }   // si falla, lanza error y no se escribe nada
+
+/* --- Recuperación: junta todos los Gists de la app y todas sus versiones anteriores --- */
+async function recoverAll(silent){
+  if(!S.cfg.ghToken || S.recovering) return 0;
+  S.recovering = true; if(!silent) toast("Buscando tus datos en GitHub…");
+  const before = alive(S.recs);
+  let pool = [];
+  try{
+    const bak = LS.get("recsBak", []); if(Array.isArray(bak)) pool = merge(pool, bak);
+    const cands = await listAppGists();
+    for(const g of cands){
+      try{ pool = merge(pool, (await readGistObj(await gh("/gists/"+g.id))).registros); }catch(e){}
+      let commits = []; try{ commits = await gh(`/gists/${g.id}/commits?per_page=100`); }catch(e){}
+      for(const c of commits.slice(0, 60)){
+        try{ pool = merge(pool, (await readGistObj(await gh(`/gists/${g.id}/${c.version}`))).registros); }catch(e){}
+      }
+    }
+    S.recs = merge(S.recs, pool); LS.set("recs", S.recs);
+    dirty = true; LS.set("dirty", true);
+  }finally{ S.recovering = false; }
+  const got = alive(S.recs) - before;
+  await syncGist(true);
+  render();
+  if(!silent || got>0) toast(got>0 ? `Recuperados ${got} registros` : "No había nada más que recuperar");
+  return got;
 }
 
 /* --- Credenciales de Strava compartidas entre dispositivos, cifradas (AES-GCM) con una clave derivada de tu token de GitHub --- */
@@ -278,6 +315,8 @@ async function doSyncGist(){
     }
     dirty = false; LS.set("dirty", false);
     S.syncAt = Date.now(); LS.set("syncAt", S.syncAt);
+    if(alive(S.recs) >= alive(LS.get("recsBak", []) || [])) LS.set("recsBak", S.recs);   // copia local con el máximo de datos visto
+    if(alive(S.recs) < 5 && !S.autoRec){ S.autoRec = true; setTimeout(()=>recoverAll(true), 50); }
   }catch(e){ S.err.sync = e; }
   S.busy.sync = false; render();
 }
@@ -2315,6 +2354,7 @@ function vAjustes(){
     </form>
     <p class="note">${S.syncAt?`Última sincronización: ${fDate(new Date(S.syncAt))} ${fClock(S.syncAt)}. `:""}Se sincroniza al abrir la app, al volver a ella y cada vez que guardas.${S.cfg.gistId?` <a href="https://gist.github.com/${esc(S.cfg.gistId)}" target="_blank" rel="noopener">Ver el Gist</a>`:""}</p>
   </div>
+  ${S.cfg.ghToken?`<div class="card"><h3>Recuperar datos</h3><p class="small">Si te falta algo, busca en todos tus Gists de la app y en todas sus versiones anteriores y lo junta (sin duplicar y respetando lo que borraste).</p><button class="primary" data-act="recover">${S.recovering?"Buscando…":"Recuperar mis datos"}</button></div>`:""}
   <div class="card">
     <h3>Copia de seguridad</h3>
     <div class="row"><button type="button" data-act="export">Exportar registros (.json)</button>
@@ -2457,6 +2497,7 @@ document.addEventListener("click", async e=>{
     fetchDetails().then(()=>{ S.recalc = false; render(); toast(S.err.det || "Marcas recalculadas"); delete S.err.det; }); return; }
   if(act==="futall"){ S.futAll = !S.futAll; render(); return; }
   if(act==="close"){ closeSheet(); return; }
+  if(act==="recover"){ recoverAll(false); return; }
   if(act==="mic"){ micToggle(); return; }
   if(act==="vparse"){ S.voice = {text: document.getElementById("vtext")?.value || "", on:false}; renderSheet(); return; }
   if(act==="vuse"){ const txt = document.getElementById("vtext")?.value || S.voice?.text || ""; const pv = parseVoice(txt); S.voice = null; haptic(); openSheet(pv.kind, pv.p); return; }
