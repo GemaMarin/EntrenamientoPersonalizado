@@ -662,6 +662,48 @@ input[type=search]{width:100%}
 .hxadd svg{width:34px;height:34px;flex:none;fill:none;stroke:var(--box);stroke-width:1.8}
 .hxadd b{display:block;font-size:14.5px}.hxadd small{display:block;color:var(--muted);font-size:12.5px}
 @media (max-width:370px){.hxtop{grid-template-columns:minmax(0,1fr) 120px}}
+
+/* ===== CrossFit e híbrido (sin Strava) ===== */
+:root{ --hyb:#7C4DDB; }
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){ --hyb:#B197FC; } }
+:root[data-theme="dark"]{ --hyb:#B197FC; }
+.kpis{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.kpis.k4{ grid-template-columns:repeat(4,1fr); }
+.kpis > div{ background:var(--surface); border:1px solid var(--line); border-radius:18px; padding:12px 8px; display:flex; flex-direction:column; align-items:center; gap:2px; text-align:center; box-shadow:var(--shadow, none); }
+.kpis .num{ font:800 26px/1 var(--display); letter-spacing:-.02em; }
+.kpis .lab{ font-size:11px; color:var(--muted); line-height:1.2; }
+@media (max-width:380px){ .kpis.k4{ grid-template-columns:repeat(2,1fr); } }
+.seg.segtop{ display:grid; grid-template-columns:1fr 1fr; gap:4px; padding:4px; border-radius:16px; background:var(--surface-2); flex-wrap:nowrap; }
+.seg.segtop button{ border:0; border-radius:12px; padding:10px 8px; font-size:14px; font-weight:600; background:transparent; color:var(--muted); transition:background .2s, color .2s; }
+.seg.segtop button[aria-pressed="true"]{ background:var(--surface); color:var(--fg); box-shadow:0 1px 4px rgba(0,0,0,.12); }
+.donutrow{ display:flex; align-items:center; gap:16px; }
+.donut{ width:120px; height:120px; flex:none; }
+.donut text{ font-size:11px; fill:var(--muted); }
+.dlist{ display:flex; flex-direction:column; gap:6px; font-size:14px; min-width:0; }
+.dlist span{ display:flex; align-items:center; gap:8px; }
+.dlist b{ margin-left:auto; padding-left:8px; }
+.lvbar{ display:flex; gap:3px; height:28px; border-radius:10px; overflow:hidden; }
+.lvbar i{ display:flex; align-items:center; justify-content:center; min-width:0; color:#fff; font:600 12px var(--body, inherit); font-style:normal; white-space:nowrap; overflow:hidden; }
+.bench{ display:flex; flex-direction:column; gap:6px; padding:10px 12px; border-radius:14px; background:var(--surface-2); }
+.bsteps{ display:flex; align-items:center; gap:8px; overflow-x:auto; scrollbar-width:none; }
+.bsteps span{ display:flex; flex-direction:column; flex:none; }
+.bsteps small{ font-size:11px; color:var(--muted); }
+.bsteps i{ color:var(--muted); font-style:normal; }
+.stlist{ display:flex; flex-direction:column; }
+.strow{ display:grid; grid-template-columns:1fr 84px auto; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--line); }
+.strow:last-child{ border-bottom:0; }
+.stn{ display:flex; flex-direction:column; font-weight:600; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.stn small{ font-weight:400; font-size:12px; color:var(--muted); }
+.spark{ width:84px; height:28px; }
+.stv{ text-align:right; white-space:nowrap; display:flex; flex-direction:column; align-items:flex-end; }
+.stv b{ font:800 18px var(--display); }
+.stv small{ font-size:11px; color:var(--muted); }
+.stv small.up{ color:var(--ok); }
+.pacebox{ display:flex; align-items:baseline; justify-content:space-between; padding:10px 14px; border-radius:14px; background:color-mix(in srgb, var(--run) 10%, transparent); }
+.pacebox b{ font:800 24px var(--display); color:var(--run); }
+.grid3{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+.grid3 label{ min-width:0; }
+.grid3 input{ width:100%; }
 </style>
 </head>
 <body>
@@ -680,9 +722,9 @@ input[type=search]{width:100%}
 <nav class="tabs" aria-label="Secciones">
   <div class="in">
     <a href="#resumen" data-v="resumen"><svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z"/></svg>Inicio</a>
-    <a href="#correr" data-v="correr"><svg viewBox="0 0 24 24"><circle cx="14" cy="4.5" r="2"/><path d="M6 20l3-5 3 2 1-5 3 3h3M9 11l3-3 3 1"/></svg>Correr</a>
+    <a href="#box" data-v="box"><svg viewBox="0 0 24 24"><path d="M2 12h2M20 12h2M5 8v8M19 8v8M8 6v12M16 6v12M8 12h8"/></svg>CrossFit</a>
     <button class="fab" data-sheet="quick" aria-label="Añadir"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
-    <a href="#box" data-v="box"><svg viewBox="0 0 24 24"><path d="M2 12h2M20 12h2M5 8v8M19 8v8M8 6v12M16 6v12M8 12h8"/></svg>Box</a>
+    <a href="#hibrido" data-v="hibrido"><svg viewBox="0 0 24 24"><circle cx="14" cy="4.5" r="2"/><path d="M6 20l3-5 3 2 1-5 3 3h3M9 11l3-3 3 1"/><path d="M2 9h3M2 13h2"/></svg>Híbrido</a>
     <a href="#futbol" data-v="futbol"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7l4 3-1.5 4.5h-5L8 10zM12 3v4M20.5 9.5 16 10M17 19l-2.5-4.5M7 19l2.5-4.5M3.5 9.5 8 10"/></svg>Fútbol</a>
   </div>
 </nav>
