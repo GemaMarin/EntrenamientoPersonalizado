@@ -347,7 +347,7 @@ function runFromRec(r){
     pace: km>0.2 && sec ? sec/km : null, elev:+r.desnivel||0, hr:+r.fc||null, vo2:+r.vo2||null, tipoRun:r.tipoRun||"", poly:r.poly||"", be:r.be||[], sp:r.sp||[],
     race: r.tipoRun==="competicion", prs:0, kcal:0, rpe: +r.rpe || (r.tipoRun==="competicion" || km>=18 ? 8 : r.tipoRun==="series" || r.tipoRun==="tempo" ? 7 : 6), rpeEst:!r.rpe, notas:r.notas };
 }
-const isHybrid = w => /hyrox|hybrid|h[ií]brid/i.test((w.formato||"")+" "+(w.nombre||""));
+const isHybrid = w => w.clase ? w.clase==="hibrido" : /hyrox|hybrid|h[ií]brid/i.test((w.formato||"")+" "+(w.nombre||""));
 function allSessions(){
   const out = [], wodDays = new Map();
   logs().forEach(l => {
@@ -1142,8 +1142,10 @@ function quickSheet(){
   const A = (attr, ico, t, s, col) => `<${attr.startsWith("for=")?"label":"button"} class="act" ${attr}><span class="ico" style="background:${col}">${ico}</span><span><b>${t}</b><small>${s}</small></span></${attr.startsWith("for=")?"label":"button"}>`;
   return ["¿Qué quieres añadir?", `<div class="actlist">
     ${A('data-sheet="voice"', '<svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>', "Dictar por voz", "Cuéntalo y lo apunto: WOD, fútbol o marca", "#111827")}
-    ${A('for="ocrFile"', ICON.cam, "Leer captura de WOD", "Una captura de AimHarder o foto de la pizarra", "var(--box)")}
-    ${A('data-sheet="wod"', ICON.pen, "Apuntar WOD a mano", "Escribe el entreno y tu resultado", "var(--box)")}
+    <div class="pick2">
+      <button class="pickc cf" data-sheet="add"><span class="ico">${ICON.bar}</span><b>WOD de CrossFit</b><small>Captura de AimHarder o a mano</small></button>
+      <button class="pickc hx" data-sheet="hybrid"><span class="ico">${QI.wod}</span><b>Entreno híbrido</b><small>Por bloques: carrera, ski, remo, wall balls…</small></button>
+    </div>
     ${A('data-sheet="runForm"', '<svg viewBox="0 0 24 24" style="stroke:#fff"><circle cx="14" cy="4.5" r="2"/><path d="M6 20l3-5 3 2 1-5 3 3h3M9 11l3-3 3 1"/></svg>', "Registrar carrera", "Km, tiempo, VO₂máx y sensaciones", "var(--run)")}
     ${A('data-sheet="futbol"', QI.foot.replace('<svg','<svg style="stroke:#fff"'), "Fútbol", "Partido, entreno o pachanga", "var(--foot)")}
     ${A('data-sheet="marca"', ICON.bar, "Nueva marca", "RM, benchmark o estación híbrida", "var(--hyb)")}
@@ -1367,7 +1369,9 @@ function vHibrido(){
   <div class="seg segtop"><button type="button" data-hseg="hyb" aria-pressed="${seg==="hyb"}">HYROX e híbrido</button><button type="button" data-hseg="run" aria-pressed="${seg==="run"}">Carrera</button></div>
   ${seg==="run" ? runSection() : `
   ${boxComp()}
+  <button class="primary big" data-sheet="hybrid">+ Registrar entreno híbrido</button>
   ${hybridKpis()}
+  ${hxProgCard()}
   ${hybridMix()}
   ${stationProgress()}
   <div class="card"><div class="row between"><h2>Entrenos híbridos</h2><span class="small muted">${hw.length}</span></div>
@@ -1962,6 +1966,96 @@ const topMus = vec => Object.entries(vec).sort((a,b)=>b[1]-a[1]).slice(0,3).map(
 /* =========================================================
    BOX
    ========================================================= */
+/* ---------- Entreno híbrido por bloques ---------- */
+const HXE = [["Carrera","m",0],["SkiErg","cal",0],["Remo","cal",0],["Bike","cal",0],["Burpee broad jumps","m",0],["Burpees","reps",0],["Zancadas","m",1],["Wall balls","reps",1],["Sled push","m",1],["Sled pull","m",1],["Farmers carry","m",1],["Box jumps","reps",0],["KB swings","reps",1],["Thrusters","reps",1],["Comba","reps",0]];
+const HXU = ["m","km","cal","reps","s"];
+const HFMT = ["AMRAP","For time","EMOM","Rondas","Intervalos","Trabajo libre"];
+const RESPH = {"AMRAP":"3R + 12 reps","For time":"14:32","EMOM":"completado","Rondas":"4 rondas · 18:10","Intervalos":"6 × 5′","Trabajo libre":""};
+const newBlock = () => ({fmt:"AMRAP", min:"15", res:"", ej:[]});
+function hfFrom(r){
+  if(r && r.tipo==="wod") return {id:r.id, fecha:r.fecha, nombre:r.nombre||"", rpe:r.rpe||"", duracion:r.duracion||"", notas:r.notas||"", orig:(r.bloques||[]).length?"":(r.texto||""), resultado:r.resultado||"", bloques: JSON.parse(JSON.stringify(r.bloques && r.bloques.length ? r.bloques : [newBlock()]))};
+  return {fecha:today(), nombre:"", rpe:"", duracion:"", notas:"", bloques:[newBlock()]};
+}
+function fmHybrid(){
+  const h = S.hf, I = (path, v, ph, extra="") => `<input data-hf="${path}" value="${val(v)}" placeholder="${ph}" ${extra}>`;
+  const sel = (path, list, cur) => `<select data-hf="${path}">${list.map(o=>`<option ${o===cur?"selected":""}>${o}</option>`).join("")}</select>`;
+  return `<div class="stack hxform" style="gap:14px">
+    <div class="grid2">${field("hf_f","Fecha",`<input id="hf_f" type="date" data-hf="fecha" value="${val(h.fecha)}">`)}${field("hf_n","Nombre (opcional)",`<input id="hf_n" data-hf="nombre" value="${val(h.nombre)}" placeholder="Hybrid · 3 AMRAP 15′">`)}</div>
+    ${h.orig?`<details open><summary class="small">Lo que tenías apuntado</summary><div class="pre small muted">${esc(h.orig)}</div></details>`:""}
+    ${h.bloques.map((b,i)=>`<div class="hblock">
+      <div class="row between"><span class="hbn">Bloque ${i+1}</span>${h.bloques.length>1?`<button type="button" class="ghost small" data-hxdelb="${i}">Quitar</button>`:""}</div>
+      <div class="hbhead">${sel(`b.${i}.fmt`, HFMT, b.fmt)}<label class="hbmin">${I(`b.${i}.min`, b.min, "15", 'inputmode="numeric"')}<span>min</span></label></div>
+      <div class="hblist">${b.ej.map((e,j)=>`<div class="hbe">
+        ${I(`b.${i}.ej.${j}.n`, e.n, "Ejercicio", 'class="hbname"')}
+        <div class="hbvals">${I(`b.${i}.ej.${j}.cant`, e.cant, "cant.", 'inputmode="decimal"')}${sel(`b.${i}.ej.${j}.ud`, HXU, e.ud)}<label class="hbkg">${I(`b.${i}.ej.${j}.kg`, e.kg, "–", 'inputmode="decimal"')}<span>kg</span></label><button type="button" class="iconbtn" data-hxdele="${i}.${j}" aria-label="Quitar ejercicio">✕</button></div>
+      </div>`).join("") || `<p class="small muted">Toca los ejercicios que hiciste en este bloque:</p>`}</div>
+      <div class="hxchips">${HXE.map(([n])=>`<button type="button" data-hxadd="${i}|${n}">+ ${n}</button>`).join("")}<button type="button" data-hxadd="${i}|">+ Otro</button></div>
+      ${field(`hf_r${i}`,"Resultado del bloque",I(`b.${i}.res`, b.res, RESPH[b.fmt]||"", `id="hf_r${i}"`))}
+    </div>`).join("")}
+    <button type="button" class="ghost" data-act="hxblock">+ Añadir otro bloque</button>
+    <div class="grid2">${field("hf_rpe","Esfuerzo (1–10)",`<input id="hf_rpe" data-hf="rpe" inputmode="numeric" value="${val(h.rpe)}" placeholder="8">`)}${field("hf_d","Duración total (min)",`<input id="hf_d" data-hf="duracion" inputmode="numeric" value="${val(h.duracion)}" placeholder="${h.bloques.reduce((t,b)=>t+(+b.min||0),0)||60}">`)}</div>
+    ${field("hf_no","Notas",`<input id="hf_no" data-hf="notas" value="${val(h.notas)}" placeholder="Sensaciones, en pareja, cambios…">`)}
+    <button class="primary big" type="button" data-act="hxsavewod">Guardar entreno híbrido</button>
+    <p class="note">Pon en cada ejercicio la cantidad que hiciste (metros, calorías o repeticiones) y el peso si lo hubo. Con eso calculo tu progresión de pesos y volumen por ejercicio y los músculos trabajados.</p>
+  </div>`;
+}
+function setHf(path, v){ const k = path.split("."); let o = S.hf; if(k[0]==="b"){ o = S.hf.bloques[+k[1]]; k.splice(0,2); if(k[0]==="ej"){ o = o.ej[+k[1]]; k.splice(0,2); } } if(o) o[k[0]] = v; }
+const exLine = e => `${e.cant?e.cant+" "+e.ud+" ":""}${e.n||"Ejercicio"}${e.kg?` (${e.kg} kg)`:""}`;
+function saveHybrid(){
+  const h = S.hf, B = h.bloques.map(b=>({...b, ej:b.ej.filter(e=>(e.n||"").trim()).map(e=>({...e, n:e.n.trim(), kg:String(e.kg||"").replace(",","."), cant:String(e.cant||"").replace(",",".")}))})).filter(b=>b.ej.length || b.res);
+  if(!B.length){ toast("Añade al menos un ejercicio"); return; }
+  const texto = B.map(b=>`${b.fmt}${b.min?` ${b.min}′`:""}: ${b.ej.map(exLine).join(" · ")}${b.res?` → ${b.res}`:""}`).join("\n");
+  const same = B.every(b=>b.fmt===B[0].fmt && b.min===B[0].min);
+  const nombre = h.nombre.trim() || `Hybrid · ${same && B.length>1 ? `${B.length} × ${B[0].fmt} ${B[0].min||""}′` : B.map(b=>`${b.fmt} ${b.min||""}′`).join(" + ")}`.replace(/ ′/g,"");
+  const rec = {tipo:"wod", clase:"hibrido", formato:"Hyrox / Hybrid", fecha:h.fecha||today(), nombre, texto, bloques:B, resultado:B.map(b=>b.res).filter(Boolean).join(" | "), rpe:h.rpe, duracion:h.duracion || String(B.reduce((t,b)=>t+(+b.min||0),0)||""), notas:h.notas, rx:"RX"};
+  if(h.orig) rec.textoOrig = h.orig;
+  if(h.id) upsertRec(h.id, rec); else addRec(rec);
+  S.hf = null; closeSheet(); haptic(); toast("Entreno híbrido guardado"); render();
+}
+function blocksView(B){
+  return `<div class="stack" style="gap:8px">${B.map((b,i)=>`<div class="hblock ro"><div class="row between"><span class="hbn">${esc(b.fmt)}${b.min?` ${esc(b.min)}′`:""}</span>${b.res?`<span class="res">${esc(b.res)}</span>`:""}</div>
+    <div class="hbro">${b.ej.map(e=>`<span><b>${esc(e.n)}</b><small>${e.cant?esc(e.cant)+" "+esc(e.ud):""}${e.kg?` · ${esc(e.kg)} kg`:""}</small></span>`).join("")}</div></div>`).join("")}</div>`;
+}
+// Progresión por ejercicio (de los bloques híbridos)
+const exKey = n => { const t = norm(n); const H = HXE.find(([x])=>norm(x)===t); return H ? H[0] : cap1(String(n).trim()); };
+function hxEntries(){
+  const by = {};
+  logs().filter(l=>l.tipo==="wod" && (l.bloques||[]).length).forEach(w=>w.bloques.forEach(b=>b.ej.forEach(e=>{ const k = exKey(e.n); (by[k] = by[k] || []).push({fecha:w.fecha, kg:parseFloat(e.kg)||0, cant:parseFloat(e.cant)||0, ud:e.ud, fmt:b.fmt, min:b.min, wid:w.id}); })));
+  Object.values(by).forEach(a=>a.sort((x,y)=>x.fecha.localeCompare(y.fecha)));
+  return by;
+}
+function lineChart(pts, unit, col){
+  if(!pts.length) return "";
+  const W=400,H=150,pl=34,pr=12,pt=14,pb=22, vs = pts.map(p=>p.v), lo = Math.max(0, Math.floor(Math.min(...vs)*0.85)), hi = Math.ceil(Math.max(...vs)*1.1) || 1;
+  const t0 = parseISO(pts[0].f).getTime(), t1 = Math.max(t0+864e5, parseISO(pts[pts.length-1].f).getTime());
+  const x = f => pts.length===1 ? (pl+W-pr)/2 : pl+(W-pl-pr)*(parseISO(f).getTime()-t0)/(t1-t0), y = v => pt+(H-pt-pb)*(1-(v-lo)/Math.max(1e-6,hi-lo));
+  let g = ""; [lo, (lo+hi)/2, hi].forEach(v=>{ g+=`<line x1="${pl}" x2="${W-pr}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-dasharray="2 4"/><text x="${pl-5}" y="${y(v)+3}" text-anchor="end">${Math.round(v*10)/10}</text>`; });
+  if(pts.length>1) g += `<polyline fill="none" stroke="${col}" stroke-width="2.4" stroke-linejoin="round" points="${pts.map(p=>`${x(p.f).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ")}"/>`;
+  pts.forEach((p,i)=>{ g += `<circle cx="${x(p.f)}" cy="${y(p.v)}" r="${i===pts.length-1?5:3.5}" fill="${col}" stroke="var(--surface)" stroke-width="2"/>`; });
+  g += `<text x="${pl}" y="${H-6}">${fDate(parseISO(pts[0].f))}</text>${pts.length>1?`<text x="${W-pr}" y="${H-6}" text-anchor="end">${fDate(parseISO(pts[pts.length-1].f))}</text>`:""}`;
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Evolución en ${unit}">${g}</svg>`;
+}
+function hxProgCard(){
+  const E = hxEntries(), keys = Object.keys(E).sort((a,b)=>E[b].length-E[a].length);
+  if(!keys.length) return `<div class="card"><h3>Progresión por ejercicio</h3><p class="small muted">Cuando apuntes tus híbridos por bloques (botón + → Entreno híbrido) verás aquí cómo evolucionan tus pesos y cantidades en cada ejercicio.</p><button class="primary" data-sheet="hybrid">+ Entreno híbrido</button></div>`;
+  return `<div class="card"><div class="row between"><h3>Progresión por ejercicio</h3><button class="addbtn soft" data-sheet="hybrid">+ Entreno</button></div>
+    <div class="stlist">${keys.map(k=>{ const a = E[k], kg = a.filter(e=>e.kg), last = a[a.length-1];
+      const vals = kg.length ? kg.map(e=>e.kg) : a.filter(e=>e.cant).map(e=>e.cant);
+      const spark = vals.length>1 ? (()=>{ const W=84,H=28, lo=Math.min(...vals), hi=Math.max(...vals), r=Math.max(1e-6,hi-lo); return `<svg viewBox="0 0 ${W} ${H}" class="spark" aria-hidden="true"><polyline fill="none" stroke="var(--hyb)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="${vals.map((v,i)=>`${(2+(W-4)*i/(vals.length-1)).toFixed(1)},${(H-3-(H-6)*(v-lo)/r).toFixed(1)}`).join(" ")}"/></svg>`; })() : "<span></span>";
+      return `<button class="strow btnrow" data-hxex="${esc(k)}"><span class="stn">${esc(k)}<small>${a.length} vez${a.length>1?"es":""} · ${fDate(parseISO(last.fecha))}</small></span>${spark}<span class="stv">${kg.length?`<b>${Math.max(...kg.map(e=>e.kg))}</b> kg<small>máx</small>`:`<b>${last.cant||"–"}</b> ${esc(last.ud||"")}<small>última</small>`}</span></button>`; }).join("")}</div>
+    <p class="note">Sale de tus entrenos híbridos apuntados por bloques. Toca un ejercicio para ver su gráfica e historial.</p></div>`;
+}
+function hxProgSheet(){
+  const k = S.hxEx, a = (hxEntries()[k]||[]); if(!a.length) return [k||"Ejercicio", "<p>Sin datos.</p>"];
+  const kg = a.filter(e=>e.kg).map(e=>({f:e.fecha, v:e.kg}));
+  const byU = {}; a.filter(e=>e.cant).forEach(e=>{ (byU[e.ud] = byU[e.ud] || []).push({f:e.fecha, v:e.cant}); });
+  return [k, `<div class="stack" style="gap:14px">
+    ${kg.length?`<div class="stack" style="gap:4px"><span class="eyebrow">Peso (kg)</span>${lineChart(kg, "kg", "var(--hyb)")}</div>`:""}
+    ${Object.entries(byU).map(([u,p])=>`<div class="stack" style="gap:4px"><span class="eyebrow">Cantidad (${esc(u)})</span>${lineChart(p, u, "var(--run)")}</div>`).join("")}
+    <div class="list">${[...a].reverse().map(e=>`<button class="item itembtn" data-wod="${e.wid}"><span class="num" style="min-width:56px;font-size:18px">${e.kg?e.kg+"<small> kg</small>":e.cant?e.cant+`<small> ${esc(e.ud)}</small>`:"–"}</span><div style="min-width:0"><div class="t">${fDate(parseISO(e.fecha))} ${e.fecha.slice(0,4)} · ${esc(e.fmt)}${e.min?` ${esc(e.min)}′`:""}</div><div class="s">${e.cant?`${e.cant} ${esc(e.ud)}`:""}${e.kg&&e.cant?` con ${e.kg} kg`:""}</div></div><span></span></button>`).join("")}</div>
+  </div>`];
+}
+
 /* ---------- Métricas de CrossFit ---------- */
 function cfKpis(wods){
   const now = new Date(), m0 = iso(new Date(now.getFullYear(), now.getMonth(), 1)), mes = wods.filter(w=>w.fecha>=m0).length;
@@ -2202,12 +2296,15 @@ function vBox(){
    PANEL INFERIOR (sheet)
    ========================================================= */
 const SHEETS = {
-  add: () => ["Añadir a Box", `<div class="actlist">
+  add: () => ["WOD de CrossFit", `<div class="actlist">
       <label class="act" for="ocrFile"><span class="ico">${ICON.cam}</span><span><b>Leer captura</b><small>Una captura de AimHarder o foto de la pizarra</small></span></label>
       <label class="act" for="bulkFiles"><span class="ico">${ICON.stack}</span><span><b>Importar varias</b><small>Selecciona muchas capturas a la vez (WODs y PRs)</small></span></label>
       <button class="act" data-sheet="wod"><span class="ico">${ICON.pen}</span><span><b>Apuntar a mano</b><small>Escribe el WOD y tu resultado</small></span></button>
       <button class="act" data-sheet="marca"><span class="ico">${ICON.bar}</span><span><b>Nueva marca</b><small>RM, benchmark o ergómetro</small></span></button>
+      <button class="act" data-sheet="hybrid"><span class="ico" style="background:var(--hyb)">${QI.wod}</span><span><b>¿Era un híbrido?</b><small>Apúntalo por bloques y ejercicios</small></span></button>
     </div>${syncHint()}`],
+  hybrid: () => [S.hf && S.hf.id ? "Editar entreno híbrido" : "Entreno híbrido", fmHybrid()],
+  hxDetail: () => hxProgSheet(),
   wod: p => [p && p.nombre ? "Revisa el WOD" : "Nuevo WOD", `${p && p.fuerza && p.fuerza.kg ? `<div class="banner info small"><b>${esc(p.fuerza.ejercicio)} ${p.fuerza.series}×${p.fuerza.reps} con ${p.fuerza.kg} kg</b> → 1RM estimado ≈ <b>${Math.round(p.fuerza.rm)} kg</b> (Brzycki). <button class="ghost" data-act="sug-marca">Guardar en marcas</button></div>`:""}${fmWod(p||{})}`],
   marca: p => ["Nueva marca", fmMarca(p||{})],
   evento: p => ["Nueva competición", fmEvento(p||{})],
@@ -2232,7 +2329,9 @@ const SHEETS = {
       ${w.notas?`<span class="com">${esc(w.notas)}</span>`:""}
       <div class="twin"><div><span class="eyebrow">Delante</span>${Body.figure("f", a.vec, {id:"df"})}</div><div><span class="eyebrow">Detrás</span>${Body.figure("b", a.vec, {id:"db"})}</div></div>
       <div class="mchips">${Object.entries(a.vec).sort((x,y)=>y[1]-x[1]).slice(0,7).map(([k])=>`<i>${Body.MUSCLES[k].n}</i>`).join("")}</div>
-      <div class="pre wtext">${esc(w.texto||"")}</div>
+      <div class="seg segtop"><button type="button" data-wclase="${w.id}|crossfit" aria-pressed="${!isHybrid(w)}">CrossFit</button><button type="button" data-wclase="${w.id}|hibrido" aria-pressed="${isHybrid(w)}">Híbrido</button></div>
+      ${(w.bloques||[]).length ? blocksView(w.bloques) : `<div class="pre wtext">${esc(w.texto||"")}</div>`}
+      ${isHybrid(w)?`<button class="primary" data-act="hxedit" data-id="${w.id}">${(w.bloques||[]).length?"Editar bloques":"Apuntar por bloques y ejercicios"}</button>`:""}
       ${w.accesorios?`<div class="acc"><div class="row between"><b class="small">Accesorios</b><label class="chk small" for="accT"><input id="accT" type="checkbox" data-acc="${w.id}" ${w.accHecho?"checked":""}> Hechos</label></div><div class="pre small muted">${esc(w.accesorios)}</div></div>`:""}
       <div class="row between">${delBtn(w.id, "Borrar WOD")}<button class="ghost" data-act="close">Cerrar</button></div></div>`]; },
   marcaDetail: k => { const arr = logs().filter(m=>m.tipo==="marca" && norm(m.ejercicio).replace(/s$/,"")===k).sort((a,b)=>b.fecha.localeCompare(a.fecha)||(b.creado||0)-(a.creado||0));
@@ -2251,6 +2350,7 @@ const ICON = {
   bar:'<svg viewBox="0 0 24 24"><path d="M2 12h20M5 8v8M19 8v8M8 6v12M16 6v12"/></svg>'
 };
 function openSheet(kind, data){
+  if(kind==="hybrid") S.hf = hfFrom(data);
   if(kind==="evento") S.prTouched = false;
   S.sheetState = {kind, data}; renderSheet();
   const el = $("#sheet"); el.hidden = false; document.body.classList.add("noscroll");
@@ -2599,6 +2699,16 @@ document.addEventListener("click", async e=>{
   if(fu){ openSheet("futDetail", fu.dataset.fut); return; }
   const fd = e.target.closest("[data-footday]");
   if(fd){ haptic(); cycleFootDay(+fd.dataset.footday); render(); return; }
+  const hxa = e.target.closest("[data-hxadd]");
+  if(hxa){ const [i, n] = hxa.dataset.hxadd.split("|"), H = HXE.find(x=>x[0]===n); S.hf.bloques[+i].ej.push({n, cant:"", ud:H?H[1]:"reps", kg:""}); haptic(); renderSheet(); const ins = document.querySelectorAll(`[data-hf^="b.${i}.ej."][data-hf$=".${n?"cant":"n"}"]`); ins[ins.length-1]?.focus(); return; }
+  const hxe = e.target.closest("[data-hxdele]");
+  if(hxe){ const [i, j] = hxe.dataset.hxdele.split(".").map(Number); S.hf.bloques[i].ej.splice(j,1); renderSheet(); return; }
+  const hxdb = e.target.closest("[data-hxdelb]");
+  if(hxdb){ S.hf.bloques.splice(+hxdb.dataset.hxdelb, 1); renderSheet(); return; }
+  const hxx = e.target.closest("[data-hxex]");
+  if(hxx){ S.hxEx = hxx.dataset.hxex; openSheet("hxDetail"); return; }
+  const wcl = e.target.closest("[data-wclase]");
+  if(wcl){ const [id, c] = wcl.dataset.wclase.split("|"); upsertRec(id, {clase:c}); haptic(); renderSheet(); render(); toast(c==="hibrido" ? "Movido a Híbrido" : "Movido a CrossFit"); return; }
   const hsg = e.target.closest("[data-hseg]");
   if(hsg){ S.hseg = hsg.dataset.hseg; LS.set("hseg", S.hseg); haptic(); render(); window.scrollTo({top:0}); return; }
   const rn = e.target.closest("[data-run]");
@@ -2626,6 +2736,9 @@ document.addEventListener("click", async e=>{
   if(act==="mus-clear"){ S.selMus = null; render(); return; }
   if(act==="wodall"){ S.wodAll = !S.wodAll; render(); return; }
   if(act==="runall"){ S.runAll = !S.runAll; render(); return; }
+  if(act==="hxblock"){ const last = S.hf.bloques[S.hf.bloques.length-1]; S.hf.bloques.push({...newBlock(), fmt:last?.fmt||"AMRAP", min:last?.min||"15"}); haptic(); renderSheet(); return; }
+  if(act==="hxsavewod"){ saveHybrid(); return; }
+  if(act==="hxedit"){ const w = logs().find(l=>l.id===a.dataset.id); if(w) openSheet("hybrid", w); return; }
   if(act==="hwall"){ S.hwAll = !S.hwAll; render(); return; }
   if(act==="stravaoff"){ const n = migrateStrava(); S.tok=null; LS.del("stravaTok"); if(S.cfg.ghToken){ wipeCred=true; LS.set("wipeCred", true); syncGist(true); } toast(`${runRecs().length} carreras guardadas en la app · Strava desconectado`); render(); return; }
   if(act==="futall"){ S.futAll = !S.futAll; render(); return; }
@@ -2692,6 +2805,7 @@ document.addEventListener("submit", e=>{
   haptic(); toast(kind==="run" ? `Carrera guardada${data.km && data.seg ? " · "+fPace(+data.seg/+data.km)+"/km" : ""}` : kind==="wod" ? "WOD guardado" : kind==="evento" ? "Competición guardada" : kind==="futbol" ? "Fútbol guardado" : "Guardado"); render();
 });
 document.addEventListener("input", e=>{
+  if(e.target.dataset && e.target.dataset.hf && S.hf){ setHf(e.target.dataset.hf, e.target.value); if(/\.fmt$/.test(e.target.dataset.hf)) renderSheet(); return; }
   if(e.target.id==="e_km" && !S.prTouched){ const sel = document.getElementById("e_pr"), c = document.getElementById("e_c"); if(sel) sel.value = evPrio({km:e.target.value, clase:c?.value}); }
   if(e.target.id==="rq" || e.target.id==="mq"){ S[e.target.id] = e.target.value; const id = e.target.id, pos = e.target.selectionStart; renderSheet(); const el = document.getElementById(id); if(el){ el.focus(); try{ el.setSelectionRange(pos, pos); }catch(err){} } return; }
   if(e.target.id==="r_km" || e.target.id==="r_t"){ const km = parseFloat(String($("#r_km")?.value||"").replace(",",".")), t = parseTime($("#r_t")?.value), o = $("#r_pace"); if(o) o.textContent = km>0 && t ? fPace(t/km)+"/km" : "–"; }
