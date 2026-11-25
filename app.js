@@ -347,6 +347,38 @@ function runFromRec(r){
     pace: km>0.2 && sec ? sec/km : null, elev:+r.desnivel||0, hr:+r.fc||null, vo2:+r.vo2||null, tipoRun:r.tipoRun||"", poly:r.poly||"", be:r.be||[], sp:r.sp||[],
     race: r.tipoRun==="competicion", prs:0, kcal:0, rpe: +r.rpe || (r.tipoRun==="competicion" || km>=18 ? 8 : r.tipoRun==="series" || r.tipoRun==="tempo" ? 7 : 6), rpeEst:!r.rpe, notas:r.notas };
 }
+// Metros corridos dentro de un WOD: por bloques (ejercicio «Carrera») o leyendo el texto («4 ROUNDS: 400 M RUN…»)
+const RUNRE = /\b(run|running|carrera|correr|corriendo)\b/i;
+const roundsOf = res => { const m = String(res||"").match(/(\d+)\s*(?:r\b|rondas?|rounds?)/i); return m ? +m[1] : 0; };
+function wodRunKm(w){
+  let m = 0, unknown = false;
+  if((w.bloques||[]).length){
+    w.bloques.forEach(b => { const k = Math.max(1, roundsOf(b.res)); (b.ej||[]).forEach(e => { if(!RUNRE.test(e.n||"") && norm(e.n)!=="carrera") return;
+      const c = parseFloat(String(e.cant||"").replace(",",".")); if(!c){ unknown = true; return; } m += (e.ud==="km" ? c*1000 : e.ud==="m" ? c : 0) * k; }); });
+    return {km:m/1000, unknown: unknown && !m};
+  }
+  // Texto: secciones separadas por líneas en blanco o por cabeceras
+  const lines = String(w.texto||"").split("\n"); let mult = 1, sect = [], secs = [];
+  const flush = () => { if(sect.length) secs.push({mult, lines:sect}); sect = []; };
+  lines.forEach(l => { const t = l.trim(); if(!t){ flush(); mult = 1; return; }
+    const h = t.match(/^(\d+)\s*(?:rounds?|rondas?)\b/i) || t.match(/^(\d+)\s*[x×]\s*(?:\d+\s*)?(?:rounds?|rondas?)/i);
+    if(h){ flush(); mult = +h[1]; return; }
+    if(/^amrap/i.test(t)){ flush(); mult = Math.max(1, roundsOf(w.resultado)); return; }
+    if(/^(for time|emom|every|tabata|rest|descanso)/i.test(t) && !RUNRE.test(t)){ flush(); mult = 1; return; }
+    sect.push(t); });
+  flush();
+  secs.forEach(sc => { const rl = sc.lines.filter(t=>RUNRE.test(t) && !/saltad|skip/i.test(t)), all = sc.lines.filter(t=>RUNRE.test(t));
+    const k = sc.mult>2 && all.length >= sc.mult-1 ? 1 : sc.mult;   // rondas escritas una a una: no multiplicar
+    rl.forEach(t => { const d = t.match(/(\d+(?:[.,]\d+)?)\s*(km|m)\b/i); if(!d){ unknown = true; return; } m += parseFloat(d[1].replace(",","."))*(d[2].toLowerCase()==="km"?1000:1)*k; }); });
+  return {km:m/1000, unknown: unknown && !m};
+}
+// Km corridos en total (carreras + metros dentro de WODs) en un periodo
+function kmTotals(from, to){
+  const inR = d => (!from || d>=from) && (!to || d<to);
+  const r = runRecs().filter(x=>inR(x.date)).reduce((t,x)=>t+x.km,0);
+  const w = logs().filter(l=>l.tipo==="wod" && inR(parseISO(l.fecha))).reduce((t,l)=>t+wodRunKm(l).km,0);
+  return {run:r, wod:w, all:r+w};
+}
 const isHybrid = w => w.clase ? w.clase==="hibrido" : /hyrox|hybrid|h[ií]brid/i.test((w.formato||"")+" "+(w.nombre||""));
 function allSessions(){
   const out = [], wodDays = new Map();
@@ -1091,7 +1123,7 @@ function bento(ss){
   const now = new Date(), e = futuros().find(x=>evPrio(x)==="A") || futuros()[0], cp = currentPhase();
   const prep = e ? futuros().find(x=>evPrio(x)==="B" && x.fecha < e.fecha) : null;
   const runs = ss.filter(s=>s.cat==="run"), m0 = new Date(now.getFullYear(), now.getMonth(), 1);
-  const kmM = runs.filter(r=>r.date>=m0).reduce((t,r)=>t+r.km,0), lr = runs[0];
+  const kmM = kmTotals(m0).all, lr = runs[0];
   const wod = logs().filter(l=>l.tipo==="wod").sort((a,b)=>b.fecha.localeCompare(a.fecha))[0];
   const fut = logs().filter(l=>l.tipo==="futbol"), ss0 = seasonStart(), goles = fut.filter(f=>parseISO(f.fecha)>=ss0).reduce((t,f)=>t+(+f.goles||0),0), nf = nextFoot();
   const wg = weekGoals(), L = bodyLoad(28), b = bestEfforts();
@@ -1192,13 +1224,13 @@ function riegel(t,d1,d2){ return t*Math.pow(d2/d1,1.06); }
    ========================================================= */
 function runHero(runs){
   const now = new Date(), y0 = new Date(now.getFullYear(), 0, 1);
-  const yr = runs.filter(r=>r.date>=y0), km = yr.reduce((t,r)=>t+r.km,0);
+  const yr = runs.filter(r=>r.date>=y0), KY = kmTotals(y0), km = KY.all;
   const r90 = runs.filter(r=>daysBetween(r.date,now)<90 && r.pace), pace = r90.length ? r90.reduce((t,r)=>t+r.sec,0)/r90.reduce((t,r)=>t+r.km,0) : null;
   const longest = yr.reduce((m,r)=>r.km>m?r.km:m,0), since = runs[0] ? daysBetween(runs[0].date, now) : null;
   const hm = futuros().find(e=>e.clase==="carrera");
   return `<div class="hero runhero">
     <div class="row between"><span class="eyebrow">${now.getFullYear()} corriendo</span>${since!=null?`<span class="glass">${since===0?"Hoy has corrido":since===1?"Ayer corriste":`Última salida hace ${since} días`}</span>`:""}</div>
-    <div class="hero-main"><span class="num huge" data-count="${Math.round(km)}">${Math.round(km)}</span><span class="hero-l"><b>km este año</b><span class="hname">${yr.length} carreras</span>${hm?`<span class="hdate">${daysBetween(now, parseISO(hm.fecha))} días para ${esc(hm.nombre)}</span>`:""}</span></div>
+    <div class="hero-main"><span class="num huge" data-count="${Math.round(km)}">${Math.round(km)}</span><span class="hero-l"><b>km este año</b><span class="hname">${yr.length} carreras${KY.wod>=0.1?` + ${KY.wod.toFixed(1)} km en WODs`:""}</span>${hm?`<span class="hdate">${daysBetween(now, parseISO(hm.fecha))} días para ${esc(hm.nombre)}</span>`:""}</span></div>
     <div class="hero-stats"><div><b>${pace?fPace(pace):"–"}</b><span>ritmo medio (90 d)</span></div><div><b>${longest?longest.toFixed(1)+" km":"–"}</b><span>tirada más larga</span></div><div><b>${r90.length}</b><span>salidas (90 d)</span></div></div>
   </div>`;
 }
@@ -1262,14 +1294,14 @@ function paceChart(runs){
 function monthlyKm(runs){
   const now=new Date(), months=[];
   for(let i=11;i>=0;i--){ const d=new Date(now.getFullYear(), now.getMonth()-i, 1); months.push({d, km:0}); }
-  runs.forEach(r=>{ const m = months.find(m=>m.d.getFullYear()===r.date.getFullYear() && m.d.getMonth()===r.date.getMonth()); if(m) m.km+=r.km; });
+  months.forEach(m=>{ const K = kmTotals(m.d, new Date(m.d.getFullYear(), m.d.getMonth()+1, 1)); m.km = K.all; m.wod = K.wod; });
   const W=400,H=160,pt=18,pb=22, max=Math.max(10,...months.map(m=>m.km)), bw=(W-8)/12, y=v=>pt+(H-pt-pb)*(1-v/max);
   let g=`<defs><linearGradient id="mg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--run)"/><stop offset="1" stop-color="var(--run)" stop-opacity=".45"/></linearGradient></defs>`;
   months.forEach((m,i)=>{ const x=4+i*bw+bw*.18, w=bw*.64, cur=i===11;
     g+=`<rect x="${x}" y="${pt}" width="${w}" height="${H-pt-pb}" rx="${w/2}" fill="var(--surface-2)"/>`;
-    if(m.km>0){ const h=Math.max(w, y(0)-y(m.km)); g+=`<rect x="${x}" y="${y(0)-h}" width="${w}" height="${h}" rx="${w/2}" fill="${cur?"var(--box)":"url(#mg)"}"/><text x="${x+w/2}" y="${y(0)-h-5}" text-anchor="middle" style="fill:var(--fg);font-weight:600">${Math.round(m.km)}</text>`; }
+    if(m.km>0){ const h=Math.max(w, y(0)-y(m.km)), hw=h*m.wod/m.km; g+=`<clipPath id="km${i}"><rect x="${x}" y="${y(0)-h}" width="${w}" height="${h}" rx="${w/2}"/></clipPath><g clip-path="url(#km${i})"><rect x="${x}" y="${y(0)-h}" width="${w}" height="${h}" fill="${cur?"var(--run)":"url(#mg)"}"/>${hw?`<rect x="${x}" y="${y(0)-h}" width="${w}" height="${hw}" fill="var(--hyb)"/>`:""}</g><text x="${x+w/2}" y="${y(0)-h-5}" text-anchor="middle" style="fill:var(--fg);font-weight:600">${Math.round(m.km)}</text>`; }
     g+=`<text x="${x+w/2}" y="${H-6}" text-anchor="middle"${cur?` style="fill:var(--fg);font-weight:700"`:""}>${MESES[m.d.getMonth()]}</text>`; });
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Kilómetros por mes">${g}</svg>`;
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Kilómetros por mes">${g}</svg>${months.some(m=>m.wod)?`<div class="legend"><span><i class="dot" style="background:var(--run)"></i>Carreras</span><span><i class="dot" style="background:var(--hyb)"></i>Corriendo dentro de WODs</span></div>`:""}`;
 }
 function zonesCard(){
   const k5 = bestEfforts()["5k"]?.t; if(!k5) return "";
@@ -1308,11 +1340,11 @@ function stationProgress(){
 }
 function hybridKpis(){
   const now = new Date(), hw = logs().filter(l=>l.tipo==="wod" && isHybrid(l)), runs = runRecs();
-  const r30 = runs.filter(r=>daysBetween(r.date,now)<30), km30 = r30.reduce((t,r)=>t+r.km,0), h30 = hw.filter(w=>daysBetween(parseISO(w.fecha),now)<30).length;
+  const K = kmTotals(addDays(parseISO(today()), -29)), km30 = K.all, h30 = hw.filter(w=>daysBetween(parseISO(w.fecha),now)<30).length;
   const vo2 = runs.find(r=>r.vo2)?.vo2;
   return `<div class="kpis">
     <div><span class="num" data-count="${h30}">${h30}</span><span class="lab">híbridos · 30 d</span></div>
-    <div><span class="num" data-count="${Math.round(km30)}">${Math.round(km30)}</span><span class="lab">km · 30 d</span></div>
+    <div><span class="num">${km30<10?km30.toFixed(1):Math.round(km30)}</span><span class="lab">km corridos · 30 d${K.wod?`<br>${K.wod.toFixed(1)} en WODs`:""}</span></div>
     <div><span class="num">${vo2||"–"}</span><span class="lab">VO₂máx</span></div>
   </div>`;
 }
@@ -1357,7 +1389,7 @@ function runSection(){
   ${prCard()}
   ${vo2Chart(runs)}
   <div class="card"><h3>Evolución del ritmo</h3>${paceChart(runs)}</div>
-  <div class="card"><div class="row between"><h3>Km por mes</h3><span class="small muted">${Math.round(runs.filter(r=>daysBetween(r.date,new Date())<365).reduce((t,r)=>t+r.km,0))} km en 12 meses</span></div>${monthlyKm(runs)}</div>
+  <div class="card"><div class="row between"><h3>Km por mes</h3><span class="small muted">${Math.round(kmTotals(addDays(new Date(), -365)).all)} km en 12 meses</span></div>${monthlyKm(runs)}</div>
   ${levelCard()}
   ${zonesCard()}
   ${runs.some(r=>r.poly)?`<div class="card"><div class="row between"><h3>Tus rutas</h3><span class="small muted">${runs.filter(r=>r.poly).length} recorridos</span></div><div id="routesmap" class="routesmap"></div><p class="note">Las carreras que importaste de Strava con su recorrido. Toca una línea para abrirla.</p></div>`:""}`;
@@ -2349,6 +2381,7 @@ const SHEETS = {
       <div class="twin"><div><span class="eyebrow">Delante</span>${Body.figure("f", a.vec, {id:"df"})}</div><div><span class="eyebrow">Detrás</span>${Body.figure("b", a.vec, {id:"db"})}</div></div>
       <div class="mchips">${Object.entries(a.vec).sort((x,y)=>y[1]-x[1]).slice(0,7).map(([k])=>`<i>${Body.MUSCLES[k].n}</i>`).join("")}</div>
       <div class="seg segtop"><button type="button" data-wclase="${w.id}|crossfit" aria-pressed="${!isHybrid(w)}">CrossFit</button><button type="button" data-wclase="${w.id}|hibrido" aria-pressed="${isHybrid(w)}">Híbrido</button></div>
+      ${(()=>{ const R = wodRunKm(w); return R.km ? `<div class="pill" style="align-self:flex-start;background:color-mix(in srgb, var(--run) 14%, transparent);color:var(--run)">Has corrido ≈ ${R.km<10?R.km.toFixed(1):Math.round(R.km)} km en este WOD</div>` : R.unknown ? `<div class="small muted">Hay carrera pero sin distancia: ${isHybrid(w)?"apúntalo por bloques":"edítalo"} con los metros para que cuente en tus km.</div>` : ""; })()}
       ${(w.bloques||[]).length ? blocksView(w.bloques) : `<div class="pre wtext">${esc(w.texto||"")}</div>`}
       ${isHybrid(w)?`<button class="primary" data-act="hxedit" data-id="${w.id}">${(w.bloques||[]).length?"Editar bloques":"Apuntar por bloques y ejercicios"}</button>`:""}
       ${w.accesorios?`<div class="acc"><div class="row between"><b class="small">Accesorios</b><label class="chk small" for="accT"><input id="accT" type="checkbox" data-acc="${w.id}" ${w.accHecho?"checked":""}> Hechos</label></div><div class="pre small muted">${esc(w.accesorios)}</div></div>`:""}
